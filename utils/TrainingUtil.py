@@ -6,19 +6,23 @@ import torch
 from tqdm import tqdm
 
 
-def train_model(model, optimizer, data, num_epochs, batch_size):
+def train_model(model, optimizer, data, num_epochs, batch_size, verbose=True):
+
+    quiet = not verbose
 
     # training loop
     model.train()
     loss_tracker = []
-    for i in range(num_epochs):
+    for i in tqdm(range(num_epochs), disable=verbose, desc='Training Model'):
 
-        print("Running Epoch: %02d / %02d" % (i, num_epochs))
+        if verbose:
+            print("-" * 60)
+            print("Running Epoch: %02d / %02d" % (i, num_epochs))
 
         # evaluate per batch
         loss = 0
         images_batches, labels_batches, bboxes_batches = data.batches(batch_size)
-        for batch_idx in tqdm(range(len(images_batches))):
+        for batch_idx in tqdm(range(len(images_batches)), disable=quiet):
             # forward
             epoch_loss = model(images_batches[batch_idx], labels_batches[batch_idx], bboxes_batches[batch_idx])
 
@@ -31,6 +35,8 @@ def train_model(model, optimizer, data, num_epochs, batch_size):
 
         # track loss
         loss_tracker.append(loss)
+        if verbose:
+            print("  Training Loss: %.2f" % loss)
 
     # make a save directory
     save_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
