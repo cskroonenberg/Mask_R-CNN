@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torchvision
-from torchvision.models import ResNet50_Weights
 from utils import AnchorBoxUtil
 
 
@@ -21,13 +20,6 @@ class FRCRPN(nn.Module):
         self.scales = [2, 4, 6]
         self.ratios = [0.5, 1.0, 1.5]
 
-        # resnet backbone
-        model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)
-        req_layers = list(model.children())[:8]
-        self.resnet_backbone = torch.nn.Sequential(*req_layers)
-        for param in self.resnet_backbone.named_parameters():
-            param[1].requires_grad = True
-
         # proposal network
         self.c_out, self.h_out, self.w_out = backbone_size
         self.num_anchors_per = len(self.scales) * len(self.ratios)
@@ -45,11 +37,9 @@ class FRCRPN(nn.Module):
         self.h_scale = self.h_inp / self.h_out
         self.w_scale = self.w_inp / self.w_out
 
-    def forward(self, images, labels, bboxes):
-        batch_size = len(images)
-
-        # extract features using backbone
-        features = self.resnet_backbone(images)
+    def forward(self, x, labels, bboxes):
+        # TODO: May need to use x.shape instead of len(x)
+        batch_size = len(x)
 
         # generate anchor boxes
         anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios)
@@ -60,7 +50,7 @@ class FRCRPN(nn.Module):
         pos_inds_flat, neg_inds_flat, pos_scores, pos_offsets, pos_labels, pos_bboxes, pos_points, neg_points, pos_inds_batch = AnchorBoxUtil.evaluate_anchor_bboxes(all_anchor_bboxes, bboxes_scaled, labels, self.pos_thresh, self.neg_thresh)
 
         # evaluate with proposal network
-        proposal = self.proposal(features)
+        proposal = self.proposal(x)
         regression = self.regression(proposal)
         confidence = self.confidence(proposal)
 
@@ -79,13 +69,11 @@ class FRCRPN(nn.Module):
         bbox_loss = self.l1_loss(pos_offsets, pos_regression) / batch_size
         total_loss = class_loss + bbox_loss
 
-        return total_loss, features, proposals, pos_labels, pos_inds_batch
+        return total_loss, proposals, pos_labels, pos_inds_batch
 
-    def evaluate(self, images, confidence_thresh=0.5, nms_thresh=0.7):
-        batch_size = len(images)
-
-        # extract features using backbone
-        features = self.resnet_backbone(images)
+    def evaluate(self, x, confidence_thresh=0.5, nms_thresh=0.7):
+        # TODO: May need to use x.shape instead of len(x)
+        batch_size = len(x)
 
         # generate anchor boxes
         anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios)
@@ -93,7 +81,7 @@ class FRCRPN(nn.Module):
         all_anchor_bboxes_batched = all_anchor_bboxes.reshape(batch_size, -1, 4)
 
         # evaluate with proposal network
-        proposal = self.proposal(features)
+        proposal = self.proposal(x)
         regression = self.regression(proposal).reshape(batch_size, -1)
         confidence = self.confidence(proposal).reshape(batch_size, -1, 4)
 
@@ -108,7 +96,7 @@ class FRCRPN(nn.Module):
             scores.append(confidence_score[nms_mask])
             proposals.append(proposals_i[nms_mask])
 
-        return proposals, scores, features
+        return proposals, scores
 
     @staticmethod
     def generate_proposals(pos_points, pos_regression):
