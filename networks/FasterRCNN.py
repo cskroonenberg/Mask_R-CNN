@@ -56,7 +56,7 @@ class FasterRCNN(nn.Module):
     def evaluate(self, images, confidence_thresh=0.5, nms_thresh=0.7):
         features = self.backbone(images)
         
-        proposals_by_batch, scores = self.rpn.evaluate(images)
+        proposals_by_batch, scores = self.rpn.evaluate(features, images)
         class_scores = self.classifier.evaluate(features, proposals_by_batch)
 
         # evaluate using softmax

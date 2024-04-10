@@ -70,9 +70,8 @@ class FRCRPN(nn.Module):
 
         return total_loss, proposals, pos_labels, pos_inds_batch
 
-    def evaluate(self, x, confidence_thresh=0.5, nms_thresh=0.7):
-        # TODO: May need to use x.shape instead of len(x)
-        batch_size = len(x)
+    def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):
+        batch_size = images.shape[0]
 
         # generate anchor boxes
         anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios)
@@ -80,9 +79,9 @@ class FRCRPN(nn.Module):
         all_anchor_bboxes_batched = all_anchor_bboxes.reshape(batch_size, -1, 4)
 
         # evaluate with proposal network
-        proposal = self.proposal(x)
-        regression = self.regression(proposal).reshape(batch_size, -1)
-        confidence = self.confidence(proposal).reshape(batch_size, -1, 4)
+        proposal = self.proposal(features)
+        regression = self.regression(proposal).reshape(batch_size, -1, 4)
+        confidence = self.confidence(proposal).reshape(batch_size, -1)
 
         proposals, scores = [], []
         for confidence_i, regression_i, batch_anchor_bboxes in zip(confidence, regression, all_anchor_bboxes_batched):
@@ -93,7 +92,12 @@ class FRCRPN(nn.Module):
             confidence_score = confidence_score[confidence_mask]
             nms_mask = torchvision.ops.nms(proposals_i, confidence_score, nms_thresh)
             scores.append(confidence_score[nms_mask])
-            proposals.append(proposals_i[nms_mask])
+            proposals_i = proposals_i[nms_mask]
+
+            # scale up to the image dimensions and clip
+            proposals_i = AnchorBoxUtil.scale_bboxes(proposals_i, self.h_scale, self.w_scale)
+            proposals_i = torchvision.ops.clip_boxes_to_image(proposals_i, (self.h_inp, self.w_inp))
+            proposals.append(proposals_i)
 
         return proposals, scores
 
