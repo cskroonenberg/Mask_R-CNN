@@ -37,9 +37,8 @@ class FRCRPN(nn.Module):
         self.h_scale = self.h_inp / self.h_out
         self.w_scale = self.w_inp / self.w_out
 
-    def forward(self, x, labels, bboxes):
-        # TODO: May need to use x.shape instead of len(x)
-        batch_size = len(x)
+    def forward(self, features, images, labels, bboxes):
+        batch_size = images.shape[0]
 
         # generate anchor boxes
         anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios)
@@ -50,7 +49,7 @@ class FRCRPN(nn.Module):
         pos_inds_flat, neg_inds_flat, pos_scores, pos_offsets, pos_labels, pos_bboxes, pos_points, neg_points, pos_inds_batch = AnchorBoxUtil.evaluate_anchor_bboxes(all_anchor_bboxes, bboxes_scaled, labels, self.pos_thresh, self.neg_thresh)
 
         # evaluate with proposal network
-        proposal = self.proposal(x)
+        proposal = self.proposal(features)
         regression = self.regression(proposal)
         confidence = self.confidence(proposal)
 
