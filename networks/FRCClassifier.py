@@ -4,7 +4,7 @@ import torchvision
 
 # the Faster R-CNN (FRC) Classifier
 class FRCClassifier(nn.Module):
-    def __init__(self, roi_size, backbone_size, n_labels, hidden_dim=512, dropout=0.1):
+    def __init__(self, roi_size, backbone_size, n_labels, hidden_dim=512, dropout=0.1, device='cpu'):
         super().__init__()
         self.roi_size = roi_size
 
@@ -15,10 +15,10 @@ class FRCClassifier(nn.Module):
             nn.Linear(backbone_size[0], hidden_dim),
             nn.Dropout(dropout),
             nn.ReLU()
-        )
+        ).to(device)
 
         # classifier
-        self.classifier = nn.Linear(hidden_dim, n_labels)
+        self.classifier = nn.Linear(hidden_dim, n_labels).to(device)
 
     def forward(self, features, proposals, labels):
 

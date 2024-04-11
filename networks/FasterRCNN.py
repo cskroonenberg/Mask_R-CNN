@@ -28,7 +28,7 @@ class FasterRCNN(nn.Module):
             # resnet backbone
             model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)
             req_layers = list(model.children())[:8]
-            self.backbone = nn.Sequential(*req_layers).to(device)
+            self.backbone = nn.Sequential(*req_layers).eval().to(device)
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
             self.backbone_size = (2048, 15, 20)
@@ -37,10 +37,11 @@ class FasterRCNN(nn.Module):
 
         # initialize the RPN and classifier
         self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, self.backbone_size, hidden_dim, dropout, device=device).to(device)
-        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout).to(device)
+        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout, device=device).to(device)
 
     def forward(self, images, truth_labels, truth_bboxes):
-        features = self.backbone(images)
+        with torch.no_grad():
+            features = self.backbone(images)
         
         # evaluate region proposal network
         rpn_loss, proposals, labels, pos_inds_batch = self.rpn(features, images, truth_labels, truth_bboxes)
