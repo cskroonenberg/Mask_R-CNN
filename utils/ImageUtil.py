@@ -20,7 +20,7 @@ def build_image(image, bboxes, labels, box_color='y', show=False, filename=None)
             continue
 
         # display bounding box
-        x, y, w, h = bbox.numpy()
+        x, y, w, h = bbox.cpu().numpy()
         rect = patches.Rectangle((x, y), w, h, linewidth=3, edgecolor=box_color, facecolor='none')
         ax.add_patch(rect)
         # display label

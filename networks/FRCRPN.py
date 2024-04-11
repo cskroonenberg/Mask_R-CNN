@@ -76,7 +76,7 @@ class FRCRPN(nn.Module):
         batch_size = images.shape[0]
 
         # generate anchor boxes
-        anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios)
+        anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios, device=self.device)
         all_anchor_bboxes = anchor_bboxes.repeat(batch_size, 1, 1, 1, 1)
         all_anchor_bboxes_batched = all_anchor_bboxes.reshape(batch_size, -1, 4)
 
