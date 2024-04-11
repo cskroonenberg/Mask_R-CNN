@@ -55,8 +55,8 @@ class FRCDataset(Dataset):
                 bboxes_i.append([x_min, y_min, x_max, y_max, label])
 
             # perform transformations for re-sizing
-            transformed = transform(image=img_data[0, :].numpy(), bboxes=np.array(bboxes_i))
-            img_data = pil_to_tensor(pil_img.resize(img_size[::-1])).type(torch.float32)
+            transformed = transform(image=img_data[0, :].cpu().numpy(), bboxes=np.array(bboxes_i))
+            img_data = pil_to_tensor(pil_img.resize(img_size[::-1])).type(torch.float32).cpu()
 
             images.append(img_data)
             labels.append(torch.tensor(labels_i))
@@ -64,7 +64,7 @@ class FRCDataset(Dataset):
 
         # store the dataset information
         self.n_samples = len(labels)
-        self.images = torch.stack(images)
+        self.images = torch.stack(images).cpu()
         self.labels = pad_sequence(labels, batch_first=True, padding_value=-1)
         self.bboxes = pad_sequence(bboxes, batch_first=True, padding_value=-1)
 
@@ -82,7 +82,7 @@ class FRCDataset(Dataset):
                 end_idx = self.n_samples
             batch_idxs = idxs[start_idx:end_idx]
 
-            images_batches.append(self.images[batch_idxs].clone())
+            images_batches.append(self.images[batch_idxs].clone().cpu())
             labels_batches.append(self.labels[batch_idxs].clone())
             bboxes_batches.append(self.bboxes[batch_idxs].clone())
             start_idx += batch_size

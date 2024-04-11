@@ -1,3 +1,4 @@
+from copy import deepcopy
 import datetime
 import matplotlib.pyplot as plt
 import os
@@ -13,7 +14,8 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
     # training loop
     model.train()
     loss_tracker = []
-    for i in tqdm(range(num_epochs), disable=verbose, desc='Training Model'):
+    best_epoch, best_loss, best_model = None, None, None
+    for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model'):
 
         if verbose:
             print("-" * 60)
@@ -34,9 +36,16 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
             loss += epoch_loss.item()
 
         # track loss
+        loss /= len(images_batches)
         loss_tracker.append(loss)
         if verbose:
             print("  Training Loss: %.2f" % loss)
+
+        # save the best model TODO: implement validation loss for this criteria
+        if (best_loss is None) or (loss < best_loss):
+            best_epoch = i
+            best_loss = loss
+            best_model = deepcopy(model.state_dict())
 
     # make a save directory
     save_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -46,6 +55,8 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
     # save the model
     model_filename = os.path.join(base_dir, "model.pt")
     torch.save(model.state_dict(), model_filename)
+    best_model_filename = os.path.join(base_dir, "model_epoch_{}.pt".format(best_epoch))
+    torch.save(best_model, best_model_filename)
 
     # save the properties
     save_properties(model, optimizer, base_dir)

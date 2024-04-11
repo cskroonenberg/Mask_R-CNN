@@ -7,7 +7,7 @@ def build_image(image, bboxes, labels, box_color='y', show=False, filename=None)
     fig, ax = plt.subplots(figsize=(16, 8))
 
     # permute for matplotlib and add to ax
-    image_permute = image.permute(1, 2, 0).numpy()
+    image_permute = image.permute(1, 2, 0).cpu().numpy()
     ax.imshow(image_permute)
 
     # convert the bounding boxes back to xywh
