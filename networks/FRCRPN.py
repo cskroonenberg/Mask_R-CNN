@@ -6,8 +6,10 @@ from utils import AnchorBoxUtil
 
 # the Faster R-CNN (FRC) Region Proposal Network
 class FRCRPN(nn.Module):
-    def __init__(self, img_size, pos_thresh, neg_thresh, backbone_size, hidden_dim=512, dropout=0.1):
+    def __init__(self, img_size, pos_thresh, neg_thresh, backbone_size, hidden_dim=512, dropout=0.1, device='cpu'):
         super().__init__()
+
+        self.device = device
 
         # store dimensions
         self.h_inp, self.w_inp = img_size
@@ -41,12 +43,12 @@ class FRCRPN(nn.Module):
         batch_size = images.shape[0]
 
         # generate anchor boxes
-        anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios)
+        anchor_bboxes = AnchorBoxUtil.generate_anchor_boxes(self.h_out, self.w_out, self.scales, self.ratios, device=self.device)
         all_anchor_bboxes = anchor_bboxes.repeat(batch_size, 1, 1, 1, 1)
 
         # evaluate for positive and negative anchors
         bboxes_scaled = AnchorBoxUtil.scale_bboxes(bboxes, 1 / self.h_scale, 1 / self.w_scale)
-        pos_inds_flat, neg_inds_flat, pos_scores, pos_offsets, pos_labels, pos_bboxes, pos_points, neg_points, pos_inds_batch = AnchorBoxUtil.evaluate_anchor_bboxes(all_anchor_bboxes, bboxes_scaled, labels, self.pos_thresh, self.neg_thresh)
+        pos_inds_flat, neg_inds_flat, pos_scores, pos_offsets, pos_labels, pos_bboxes, pos_points, neg_points, pos_inds_batch = AnchorBoxUtil.evaluate_anchor_bboxes(all_anchor_bboxes, bboxes_scaled, labels, self.pos_thresh, self.neg_thresh, device=self.device)
 
         # evaluate with proposal network
         proposal = self.proposal(features)

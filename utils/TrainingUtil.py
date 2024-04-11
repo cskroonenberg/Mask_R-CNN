@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 
 
-def train_model(model, optimizer, data, num_epochs, batch_size, verbose=True):
+def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', verbose=True):
 
     quiet = not verbose
 
@@ -24,7 +24,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, verbose=True):
         images_batches, labels_batches, bboxes_batches = data.batches(batch_size)
         for batch_idx in tqdm(range(len(images_batches)), disable=quiet):
             # forward
-            epoch_loss = model(images_batches[batch_idx], labels_batches[batch_idx], bboxes_batches[batch_idx])
+            epoch_loss = model(images_batches[batch_idx].to(device), labels_batches[batch_idx].to(device), bboxes_batches[batch_idx].to(device))
 
             # backward
             optimizer.zero_grad()

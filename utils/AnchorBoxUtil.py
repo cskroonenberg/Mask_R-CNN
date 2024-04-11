@@ -17,14 +17,14 @@ def calculate_offsets(anchor_coords, pred_coords):
     return torch.stack([tx, ty, tw, th]).transpose(0, 1)
 
 
-def evaluate_anchor_bboxes(all_anchor_bboxes, all_truth_bboxes, all_truth_labels, pos_thresh, neg_thresh):
+def evaluate_anchor_bboxes(all_anchor_bboxes, all_truth_bboxes, all_truth_labels, pos_thresh, neg_thresh, device='cpu'):
     batch_size = len(all_anchor_bboxes)
     num_anchor_bboxes_per = np.prod(list(all_anchor_bboxes.shape)[1:-1])
     num_anchor_bboxes = np.prod(list(all_anchor_bboxes.shape[1:4]))
     max_objects = all_truth_labels.shape[1]
 
     # get the complete IoU set
-    iou_set = torch.zeros((batch_size, num_anchor_bboxes, max_objects))
+    iou_set = torch.zeros((batch_size, num_anchor_bboxes, max_objects)).to(device)
     for idx, (anchor_bboxes, truth_bboxes) in enumerate(zip(all_anchor_bboxes, all_truth_bboxes)):
         iou_set[idx, :] = torchvision.ops.box_iou(anchor_bboxes.reshape(-1, 4), truth_bboxes)
 
@@ -121,11 +121,11 @@ def evaluate_anchor_bboxes_old(all_anchor_bboxes, all_truth_bboxes, all_truth_la
     return pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets
 
 
-def generate_anchors(h, w, resolution=10):
+def generate_anchors(h, w, device='cpu', resolution=10):
 
     # determine anchor points
-    anc_pts_x = torch.arange(0, w) + 0.5
-    anc_pts_y = torch.arange(0, h) + 0.5
+    anc_pts_x = (torch.arange(0, w) + 0.5).to(device)
+    anc_pts_y = (torch.arange(0, h) + 0.5).to(device)
     # w_steps = int(w / resolution)
     # h_steps = int(h / resolution)
     # anc_pts_x = torch.linspace(0, w, w_steps)[1:-1]
@@ -134,14 +134,14 @@ def generate_anchors(h, w, resolution=10):
     return anc_pts_x, anc_pts_y
 
 
-def generate_anchor_boxes(h, w, scales, ratios):
+def generate_anchor_boxes(h, w, scales, ratios, device):
 
     # determine anchor points
-    anc_pts_x, anc_pts_y = generate_anchors(h, w)
+    anc_pts_x, anc_pts_y = generate_anchors(h, w, device)
 
     # initialize tensor for anchors
     n_boxes_per = len(scales) * len(ratios)
-    anchor_boxes = torch.zeros(len(anc_pts_x), len(anc_pts_y), n_boxes_per, 4)
+    anchor_boxes = torch.zeros(len(anc_pts_x), len(anc_pts_y), n_boxes_per, 4).to(device)
 
     for x_i, x in enumerate(anc_pts_x):
         for y_i, y in enumerate(anc_pts_y):

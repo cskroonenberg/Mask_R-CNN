@@ -8,7 +8,7 @@ from torchvision.models import ResNet50_Weights
 
 class FasterRCNN(nn.Module):
     def __init__(self, img_size, roi_size, n_labels,
-                 pos_thresh=0.68, neg_thresh=0.30, hidden_dim=512, dropout=0.1, backbone='resnet50'):
+                 pos_thresh=0.68, neg_thresh=0.30, hidden_dim=512, dropout=0.1, backbone='resnet50', device='cpu'):
         super().__init__()
 
         self.hyper_params = {
@@ -22,11 +22,13 @@ class FasterRCNN(nn.Module):
             'backbone': backbone
         }
 
+        self.device = device
+
         if backbone == 'resnet50':
             # resnet backbone
             model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)
             req_layers = list(model.children())[:8]
-            self.backbone = nn.Sequential(*req_layers)
+            self.backbone = nn.Sequential(*req_layers).to(device)
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
             self.backbone_size = (2048, 15, 20)
@@ -34,8 +36,8 @@ class FasterRCNN(nn.Module):
             raise NotImplementedError
 
         # initialize the RPN and classifier
-        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, self.backbone_size, hidden_dim, dropout)
-        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout)
+        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, self.backbone_size, hidden_dim, dropout, device=device).to(device)
+        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout).to(device)
 
     def forward(self, images, truth_labels, truth_bboxes):
         features = self.backbone(images)
