@@ -16,8 +16,8 @@ This utility is adapted from: https://github.com/voxel51/fiftyone-examples/blob/
 def load_data(dataset_name, num_train, num_val, img_size):
     """
     :type dataset_name: str
-    :type num_train: int
-    :type num_val: int
+    :type num_train: int | None
+    :type num_val: int | None
     :type img_size: tuple
     :return: train_data, val_data, str2id, id2str
     """
