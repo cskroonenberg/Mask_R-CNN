@@ -56,7 +56,7 @@ class FasterRCNN(nn.Module):
                                          output_size=self.roi_size)
 
         # run classifier
-        class_scores = self.classifier(rois, labels)
+        class_scores = self.classifier(rois)
 
         # calculate cross entropy loss
         class_loss = nn.functional.cross_entropy(class_scores, labels)
@@ -69,7 +69,13 @@ class FasterRCNN(nn.Module):
         features = self.backbone(images)
         
         proposals_by_batch, scores = self.rpn.evaluate(features, images)
-        class_scores = self.classifier(features, proposals_by_batch)
+        
+        # perform ROI align for Mask R-CNN
+        rois = torchvision.ops.roi_align(input=features,
+                                         boxes=proposals_by_batch,
+                                         output_size=self.roi_size)
+        
+        class_scores = self.classifier(rois)
 
         # evaluate using softmax
         p = nn.functional.softmax(class_scores, dim=-1)
