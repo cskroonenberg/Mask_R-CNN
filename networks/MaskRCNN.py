@@ -1,4 +1,5 @@
 from networks.FRCRPN import FRCRPN
+from networks.FCN import MaskHead
 from networks.FRCClassifier import FRCClassifier
 
 import torch
@@ -6,7 +7,7 @@ import torch.nn as nn
 import torchvision
 from torchvision.models import ResNet50_Weights
 
-class FasterRCNN(nn.Module):
+class MaskRCNN(nn.Module):
     def __init__(self, img_size, roi_size, n_labels,
                  pos_thresh=0.68, neg_thresh=0.30, hidden_dim=512, dropout=0.1, backbone='resnet50', device='cpu'):
         super().__init__()
@@ -38,6 +39,8 @@ class FasterRCNN(nn.Module):
         # initialize the RPN and classifier
         self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, self.backbone_size, hidden_dim, dropout)
         self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout)
+        self.mask_head = MaskHead(2048, num_classes=n_labels)
+        self.mask_loss_fn = nn.BCELoss(reduction='none')
 
     def forward(self, images, truth_labels, truth_bboxes):
         features = self.backbone(images)
@@ -53,7 +56,7 @@ class FasterRCNN(nn.Module):
         # perform ROI align for Mask R-CNN
         rois = torchvision.ops.roi_align(input=features,
                                          boxes=proposals_by_batch,
-                                         output_size=self.roi_size)
+                                         output_size=self.hyper_params["roi_size"])
 
         # run classifier
         class_scores = self.classifier(rois)
@@ -62,8 +65,10 @@ class FasterRCNN(nn.Module):
         class_loss = nn.functional.cross_entropy(class_scores, labels)
 
         # TODO: FCN here and add to loss calculation
+        masks = self.mask_head(rois)
+        mask_loss = self.mask_loss_fn(masks, labels) # TODO is labels the right truth here?
 
-        return rpn_loss + class_loss
+        return rpn_loss + class_loss + mask_loss
 
     def evaluate(self, images, confidence_thresh=0.5, nms_thresh=0.7):
         features = self.backbone(images)
@@ -73,7 +78,7 @@ class FasterRCNN(nn.Module):
         # perform ROI align for Mask R-CNN
         rois = torchvision.ops.roi_align(input=features,
                                          boxes=proposals_by_batch,
-                                         output_size=self.roi_size)
+                                         output_size=self.hyper_params["roi_size"])
         
         class_scores = self.classifier(rois)
 
