@@ -1,5 +1,5 @@
 from networks.FRCRPN import FRCRPN
-from networks.MRCClassifier import MRCClassifier
+from networks.FRCClassifier import FRCClassifier
 
 import torch
 import torch.nn as nn
@@ -37,7 +37,7 @@ class FasterRCNN(nn.Module):
 
         # initialize the RPN and classifier
         self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, self.backbone_size, hidden_dim, dropout)
-        self.classifier = MRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout)
+        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout)
 
     def forward(self, images, truth_labels, truth_bboxes):
         features = self.backbone(images)
@@ -50,10 +50,17 @@ class FasterRCNN(nn.Module):
             batch_proposals = proposals[torch.where(pos_inds_batch == idx)[0]].detach().clone()
             proposals_by_batch.append(batch_proposals)
 
-        # run classifier (roi_align is done inside this module)
-        class_loss = self.classifier(features, proposals_by_batch, labels)
+        # perform ROI align for Mask R-CNN
+        rois = torchvision.ops.roi_align(input=features,
+                                         boxes=proposals_by_batch,
+                                         output_size=self.roi_size)
 
-        # TODO: Potentially separate roi_align from classification?
+        # run classifier
+        class_scores = self.classifier(rois, labels)
+
+        # calculate cross entropy loss
+        class_loss = nn.functional.cross_entropy(class_scores, labels)
+
         # TODO: FCN here and add to loss calculation
 
         return rpn_loss + class_loss
@@ -62,7 +69,7 @@ class FasterRCNN(nn.Module):
         features = self.backbone(images)
         
         proposals_by_batch, scores = self.rpn.evaluate(features, images)
-        class_scores = self.classifier.evaluate(features, proposals_by_batch)
+        class_scores = self.classifier(features, proposals_by_batch)
 
         # evaluate using softmax
         p = nn.functional.softmax(class_scores, dim=-1)
