@@ -51,8 +51,14 @@ class FasterRCNN(nn.Module):
             batch_proposals = proposals[torch.where(pos_inds_batch == idx)[0]].detach().clone()
             proposals_by_batch.append(batch_proposals)
 
+        roi_pool = torchvision.ops.roi_pool(input=features,
+                                            boxes=proposals,
+                                            output_size=self.roi_size)
+
         # run classifier
-        class_loss = self.classifier(features, proposals_by_batch, labels)
+        class_scores = self.classifier(roi_pool)
+
+        class_loss = nn.functional.cross_entropy(class_scores, labels)
 
         return rpn_loss + class_loss
 
@@ -60,7 +66,12 @@ class FasterRCNN(nn.Module):
         features = self.backbone(images)
         
         proposals_by_batch, scores = self.rpn.evaluate(features, images, confidence_thresh, nms_thresh)
-        class_scores = self.classifier.evaluate(features, proposals_by_batch)
+        
+        roi_pool = torchvision.ops.roi_pool(input=features,
+                                            boxes=proposals_by_batch,
+                                            output_size=self.roi_size)
+        
+        class_scores = self.classifier(roi_pool)
 
         # evaluate using softmax
         p = nn.functional.softmax(class_scores, dim=-1)
