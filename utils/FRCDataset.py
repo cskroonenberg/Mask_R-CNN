@@ -14,7 +14,7 @@ corresponding bounding box scaling is taken from: https://sheldonsebastian94.med
 
 
 class FRCDataset(Dataset):
-    def __init__(self, dataset, img_size, cat_ids, dataset_type):
+    def __init__(self, dataset, img_size, str2id, dataset_type):
         """
         :type dataset: fiftyone.core.dataset.Dataset
         """
@@ -24,9 +24,9 @@ class FRCDataset(Dataset):
         self.images = None
         self.labels = None
         self.bboxes = None
-        self.parse_dataset(dataset, img_size, cat_ids)
+        self.parse_dataset(dataset, img_size, str2id)
 
-    def parse_dataset(self, dataset, img_size, cat_ids):
+    def parse_dataset(self, dataset, img_size, str2id):
 
         # create resize transform pipeline
         h_out, w_out = img_size
@@ -50,7 +50,7 @@ class FRCDataset(Dataset):
                 x_min, w = x_min * w_img, w * w_img
                 y_min, h = y_min * h_img, h * h_img
                 x_max, y_max = x_min + w, y_min + h
-                label = cat_ids[detection.label]
+                label = str2id[detection.label]
                 labels_i.append(label)
                 bboxes_i.append([x_min, y_min, x_max, y_max, label])
 

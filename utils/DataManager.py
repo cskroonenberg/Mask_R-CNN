@@ -1,5 +1,7 @@
 import fiftyone.utils.coco as fouc
+import fiftyone.zoo as foz
 import numpy as np
+import os
 from PIL import Image
 import torch
 from torchvision.transforms.functional import pil_to_tensor
@@ -11,7 +13,50 @@ This utility is adapted from: https://github.com/voxel51/fiftyone-examples/blob/
 """
 
 
-def load_data(dataset_train, dataset_val, img_size):
+def load_data(dataset_name, num_train, num_val, img_size):
+    """
+    :type dataset_name: str
+    :type num_train: int
+    :type num_val: int
+    :type img_size: tuple
+    :return: train_data, val_data, str2id, id2str
+    """
+
+    # load in the raw datasets from zoo
+    dataset_train = foz.load_zoo_dataset(
+        dataset_name,
+        splits=["train"],
+        max_samples=num_train
+    )
+    dataset_val = foz.load_zoo_dataset(
+        dataset_name,
+        splits=["validation"],
+        max_samples=num_val
+    )
+
+    # load in the id-to-string mapping and vice-versa
+    id2str = load_id2str_mapping(dataset_name)
+    id2str[-1] = "pad"
+    str2id = {id2str[int_id]: int_id for int_id in id2str.keys()}
+
+    # parse the datasets
+    train_data = FRCDataset(dataset_train, img_size, str2id, 'Train')
+    val_data = FRCDataset(dataset_val, img_size, str2id, 'Validation')
+    return train_data, val_data, str2id, id2str
+
+
+def load_id2str_mapping(dataset_name):
+    filename = os.path.join("config", dataset_name, "id2str_mapping.txt")
+    id2str = {}
+    with open(filename, 'r') as file:
+        lines = file.read().split('\n')
+        for line in lines:
+            split = line.split('=')
+            id2str[int(split[0])] = split[1]
+    return id2str
+
+
+def load_data_old(dataset_train, dataset_val, img_size):
     """
     :type dataset_train: fiftyone.core.dataset.Dataset
     :type dataset_val: fiftyone.core.dataset.Dataset
