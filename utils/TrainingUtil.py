@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import os
 from pathlib import Path
 import torch
+import time
 from tqdm import tqdm
 
 
@@ -15,6 +16,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
     model.train()
     loss_tracker = []
     best_epoch, best_loss, best_model = None, None, None
+    time_start = time.time()
     for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model'):
 
         if verbose:
@@ -39,7 +41,12 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
         loss /= len(images_batches)
         loss_tracker.append(loss)
         if verbose:
-            print("  Training Loss: %.2f" % loss)
+            msg = "  Training Loss: %.2f" % loss
+            if i != num_epochs:
+                time_per_epoch = (time.time() - time_start) / i
+                est_time_remaining = (num_epochs - i) * time_per_epoch
+                msg += " (Est. time remaining: {})".format(datetime.timedelta(seconds=est_time_remaining))
+            print(msg)
 
         # save the best model TODO: implement validation loss for this criteria
         if (best_loss is None) or (loss < best_loss):
