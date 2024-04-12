@@ -11,6 +11,8 @@ class FasterRCNN(nn.Module):
                  pos_thresh=0.68, neg_thresh=0.30, hidden_dim=512, dropout=0.1, backbone='resnet50', device='cpu'):
         super().__init__()
 
+        self.roi_size = roi_size
+
         self.hyper_params = {
             'img_size': img_size,
             'roi_size': roi_size,
@@ -51,8 +53,8 @@ class FasterRCNN(nn.Module):
             proposals_by_batch.append(batch_proposals)
 
         roi_pool = torchvision.ops.roi_pool(input=features,
-                                            boxes=proposals,
-                                            output_size=self.roi_size)
+                                            boxes=proposals_by_batch,
+                                            output_size=self.hyper_params["roi_size"])
 
         # run classifier
         class_scores = self.classifier(roi_pool)
@@ -68,7 +70,7 @@ class FasterRCNN(nn.Module):
         
         roi_pool = torchvision.ops.roi_pool(input=features,
                                             boxes=proposals_by_batch,
-                                            output_size=self.roi_size)
+                                            output_size=self.hyper_params["roi_size"])
         
         class_scores = self.classifier(roi_pool)
 
