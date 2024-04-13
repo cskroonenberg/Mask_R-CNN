@@ -8,7 +8,7 @@ import time
 from tqdm import tqdm
 
 
-def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', verbose=True):
+def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', verbose=True, save=True):
 
     quiet = not verbose
 
@@ -16,7 +16,6 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
     model.train()
     loss_tracker = []
     best_epoch, best_loss, best_model = None, None, None
-    time_start = time.time()
     for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model'):
 
         if verbose:
@@ -41,12 +40,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
         loss /= len(images_batches)
         loss_tracker.append(loss)
         if verbose:
-            msg = "  Training Loss: %.2f" % loss
-            if i != num_epochs:
-                time_per_epoch = (time.time() - time_start) / i
-                est_time_remaining = (num_epochs - i) * time_per_epoch
-                msg += " (Est. time remaining: {})".format(datetime.timedelta(seconds=est_time_remaining))
-            print(msg)
+            print("  Training Loss: %.2f" % loss)
 
         # save the best model TODO: implement validation loss for this criteria
         if (best_loss is None) or (loss < best_loss):
@@ -54,24 +48,25 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
             best_loss = loss
             best_model = deepcopy(model.state_dict())
 
-    # make a save directory
-    save_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    base_dir = os.path.join("results/models", save_timestamp)
-    Path(base_dir).mkdir(parents=True, exist_ok=True)
+    if save:
+        # make a save directory
+        save_timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        base_dir = os.path.join("results/models", save_timestamp)
+        Path(base_dir).mkdir(parents=True, exist_ok=True)
 
-    # save the model
-    model_filename = os.path.join(base_dir, "model.pt")
-    torch.save(model.state_dict(), model_filename)
-    best_model_filename = os.path.join(base_dir, "model_epoch_{}.pt".format(best_epoch))
-    torch.save(best_model, best_model_filename)
+        # save the model
+        model_filename = os.path.join(base_dir, "model.pt")
+        torch.save(model.state_dict(), model_filename)
+        best_model_filename = os.path.join(base_dir, "model_epoch_{}.pt".format(best_epoch))
+        torch.save(best_model, best_model_filename)
 
-    # save the properties
-    save_properties(model, optimizer, base_dir)
+        # save the properties
+        save_properties(model, optimizer, base_dir)
 
-    # save the loss curve
-    save_loss_curve(loss_tracker, base_dir, save_timestamp)
+        # save the loss curve
+        save_loss_curve(loss_tracker, base_dir, save_timestamp)
 
-    print("Model, properties, and results saved to: {}".format(base_dir))
+        print("Model, properties, and results saved to: {}".format(base_dir))
     return loss_tracker
 
 
