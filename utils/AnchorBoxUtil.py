@@ -173,3 +173,203 @@ def scale_bboxes(bboxes, h_scale, w_scale):
         bboxes_scaled[:, :, :, [1, 3]] *= h_scale
     bboxes_scaled.masked_fill_(pad_mask, -1)
     return bboxes_scaled
+
+
+def gen_k_center_anchors(sizes, aspect_ratios):
+    """
+    Generates k 0-centered anchors, where k = len(scales) x len(aspect_ratios)
+    :param sizes: tuple of scales, defined as sqrt(H x W)
+    :param aspect_ratios: tuple of aspect_ratios, defined as W:H
+    :return: tensor of anchors, k x 4, in format x1, y1, x2, y2
+    """
+
+    sizes = torch.as_tensor(sizes, dtype=torch.float32)
+    aspect_ratios = torch.as_tensor(aspect_ratios)
+    h_ratios = torch.sqrt(aspect_ratios)
+    w_ratios = 1.0 / h_ratios
+
+    h_ratios = h_ratios.unsqueeze(1)
+    w_ratios = w_ratios.unsqueeze(1)
+    sizes = sizes.unsqueeze(0)
+
+    w = torch.matmul(w_ratios, sizes).reshape(-1)
+    h = torch.matmul(h_ratios, sizes).reshape(-1)
+
+    base_anchors = torch.stack([-w, -h, w, h], dim=1) / 2
+    base_anchors = base_anchors
+    return base_anchors.round()
+
+
+def get_anchors(img, features, k_center_anchors):
+    """
+    Generates the anchors on a given input image
+    :param img: input image
+    :param features: feature map corresponding to input image. This is assumed to be the output of the final conv layer
+    :return: anchors corresponding to each input image, tensor (k * feature_W * feature_H) x 4
+    """
+
+    image_h, image_w = img.shape[-2:]
+    feature_h, feature_w = features.shape[-2:]
+    image_interval_w = int(image_w / feature_w)
+    image_interval_h = int(image_h / feature_h)
+
+    image_centers_w = torch.arange(0, feature_w) * image_interval_w
+    image_centers_h = torch.arange(0, feature_h) * image_interval_h
+
+    image_centers_w, image_centers_h = torch.meshgrid(image_centers_w, image_centers_h)
+
+    image_centers_w = image_centers_w.reshape(-1)
+    image_centers_h = image_centers_h.reshape(-1)
+
+    image_centers = torch.stack([image_centers_w, image_centers_h, image_centers_w, image_centers_h], dim=1)
+
+    k = k_center_anchors.shape[0]
+    num_centers = image_centers.shape[0]
+
+    image_centers = image_centers.repeat_interleave(k, dim=0)
+    k_center_anchors = k_center_anchors.repeat(num_centers, 1)
+
+    anchors = image_centers + k_center_anchors
+
+    return anchors
+
+
+def get_anchors_batch(img_all, sizes, aspect_ratios, features_all, device='cpu'):
+    """
+    Generates a tensor of anchors corresponding to the batch of input images
+    :param img_all: a tensor containing a batch of input images: (num images) x 3 x H x W
+    :param sizes: tuple of scales, defined as sqrt(H x W)
+    :param aspect_ratios: tuple of aspect_ratios, defined as W:H
+    :param features_all: features from the feature extractor
+    :return: A tensor of anchors along with a tensor of extracted features for use in other networks
+    """
+
+    batch_size = img_all.shape[0]
+    k_center_anchors = gen_k_center_anchors(sizes, aspect_ratios)
+    anchors = get_anchors(img_all[0, :, :, :], features_all[0, :, :, :], k_center_anchors)
+    anchors = anchors.unsqueeze(0).repeat(batch_size, 1, 1).to(device)
+
+    return anchors
+
+
+def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_labels, pos_thresh=0.7, neg_thresh=0.3, output_batch=128, pos_fraction=0.5, device='cpu'):
+
+    num_pos = int(output_batch * pos_fraction)
+    num_neg = output_batch - num_pos
+
+    # evaluate IoUs
+    pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets, pos_anchors = [], [], [], [], [], []
+
+    for idx, (anchor_bboxes, truth_bboxes, truth_labels) in enumerate(zip(all_anchor_bboxes, all_truth_bboxes, all_truth_labels)):
+        # calculate the IoUs
+        # anchor_bboxes_flat = anchor_bboxes.reshape(-1, 4)
+        truth_bboxes = truth_bboxes[torch.all((truth_bboxes != -1), dim=1), :]
+        iou_set = torchvision.ops.box_iou(anchor_bboxes, truth_bboxes) # iou matrix, (num anchors) x (gt bboxes)
+
+        # get the max per category
+        iou_max_per_label, _ = iou_set.max(dim=0, keepdim=True)
+        iou_max_per_bbox, pos_indices_per_bbox = iou_set.max(dim=1, keepdim=True)
+
+
+        # "positive" consists of any anchor box that is (at least) one of:
+        # 1. the max IoU and a ground truth box
+        # 2. above our threshold
+        pos_mask = torch.logical_and(iou_set == iou_max_per_label, iou_max_per_label > 0)
+        pos_mask = torch.logical_or(pos_mask, iou_set > pos_thresh)
+        pos_inds_flat = torch.where(pos_mask)[0]
+
+        if len(pos_inds_flat) > num_pos:
+            # from pos_inds_flat, randomly sample num_pos samples without replacement
+            rand_idx_pos = torch.randperm(len(pos_inds_flat))
+            pos_inds_flat = pos_inds_flat[rand_idx_pos][0 : num_pos]
+            pos_coord_inds.append(pos_inds_flat)
+        else:
+            # take all positive samples
+            pos_coord_inds.append(pos_inds_flat)
+
+        # "negative" consists of any anchor box whose max is below the threshold
+        neg_mask = iou_max_per_bbox < neg_thresh
+        neg_inds_flat = torch.where(neg_mask)[0]
+
+        if len(pos_inds_flat) > num_pos:
+            # from neg_inds_flat, randomly sample num_neg samples without replacement
+            rand_idx_neg = torch.randperm(len(neg_inds_flat))
+            neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : num_neg]
+            neg_coord_inds.append(neg_inds_flat)
+        else:
+            # pad with negative samples
+            rand_idx_neg = torch.randperm(len(neg_inds_flat))
+            neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : (num_neg + num_pos - len(pos_inds_flat))]
+            neg_coord_inds.append(neg_inds_flat)
+
+        # get the IoU scores
+        pos_scores.append(iou_max_per_bbox[pos_inds_flat])
+
+        # get the classifications
+        pos_indices = pos_indices_per_bbox[pos_inds_flat]
+        pos_classes_i = truth_labels[pos_indices].squeeze()
+        pos_classes.append(pos_classes_i)
+
+        # calculate the offsets
+        pos_offsets.append(boxes_to_delta(anchor_bboxes[pos_inds_flat], truth_bboxes[pos_indices].squeeze(1)))
+
+        pos_anchors.append(anchor_bboxes[pos_inds_flat])
+
+    return pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets, pos_anchors
+
+
+def delta_to_boxes(rpn_delta, anchors):
+    """
+    Applies learned deltas from RPN network to the anchors to generate predicted boxes
+    :param rpn_delta: learned deltas from RPN network (t_x, t_y, t_w, t_h), dimensions: num_anchors x 4
+    :param anchors: anchors on input image (x1, y1, x2, y2)
+    :return: predicted boxes
+    """
+    anchors_xywh = torchvision.ops.box_convert(anchors, in_fmt='xyxy', out_fmt='cxcywh')
+
+    x_a = anchors_xywh[:, 0::4]
+    y_a = anchors_xywh[:, 1::4]
+    w_a = anchors_xywh[:, 2::4]
+    h_a = anchors_xywh[:, 3::4]
+
+    t_x = rpn_delta[:, 0::4]
+    t_y = rpn_delta[:, 1::4]
+    t_w = rpn_delta[:, 2::4]
+    t_h = rpn_delta[:, 3::4]
+
+    t_w = torch.clamp(t_w, max=4)
+    t_h = torch.clamp(t_h, max=4)
+
+    pred_box_x = torch.multiply(t_x, w_a) + x_a
+    pred_box_y = torch.multiply(t_y, h_a) + y_a
+    pred_box_w = torch.multiply(w_a, torch.exp(t_w))
+    pred_box_h = torch.multiply(h_a, torch.exp(t_h))
+
+    pred_box = torch.cat((pred_box_x, pred_box_y, pred_box_w, pred_box_h), dim=1)
+    pred_box = torchvision.ops.box_convert(pred_box, in_fmt='cxcywh', out_fmt='xyxy')
+
+    return pred_box.round()
+
+
+def boxes_to_delta(anchor_coords, pred_coords):
+    # calculate offset as detailed in the paper
+    anc = torchvision.ops.box_convert(anchor_coords, in_fmt='xyxy', out_fmt='cxcywh')
+    pred = torchvision.ops.box_convert(pred_coords, in_fmt='xyxy', out_fmt='cxcywh')
+    tx = (pred[:, 0] - anc[:, 0]) / anc[:, 2]
+    ty = (pred[:, 1] - anc[:, 1]) / anc[:, 3]
+    tw = torch.log(pred[:, 2] / anc[:, 2])
+    th = torch.log(pred[:, 3] / anc[:, 3])
+
+    return torch.stack([tx, ty, tw, th]).transpose(0, 1)
+
+
+def get_closest_label(proposals, bboxes, labels):
+    assigned_labels = []
+    for idx, (proposal, bbox, label) in enumerate(zip(proposals, bboxes, labels)):
+        bbox = bbox[torch.all((bbox != -1), dim=1), :]
+        iou_set = torchvision.ops.box_iou(proposal, bbox) # iou matrix, (num proposal boxes) x (gt bboxes)
+        _, best_indices_per_bbox = iou_set.max(dim=1)
+        assigned_label = label[best_indices_per_bbox]
+        assigned_labels.append(assigned_label)
+
+    return assigned_labels
