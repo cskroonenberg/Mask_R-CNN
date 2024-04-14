@@ -32,9 +32,10 @@ class FRCClassifier(nn.Module):
         return scores
 
 class FRCClassifier_fasteronly(nn.Module):
-    def __init__(self, roi_size, backbone_size, n_labels, hidden_dim=512, dropout=0.1, device='cpu'):
+    def __init__(self, roi_size, backbone_size, n_labels, feature_to_image_scale, hidden_dim=512, dropout=0.1, device='cpu'):
         super().__init__()
         self.roi_size = roi_size
+        self.feature_to_image_scale = feature_to_image_scale
 
         # hidden
         self.hidden = nn.Sequential(
@@ -46,7 +47,7 @@ class FRCClassifier_fasteronly(nn.Module):
         ).to(device)
 
         # classifier
-        self.classifier = nn.Linear(hidden_dim, n_labels).to(device)
+        self.classifier = nn.Linear(hidden_dim, n_labels+1).to(device)
 
     def forward(self, features, proposals, labels):
 
@@ -54,7 +55,7 @@ class FRCClassifier_fasteronly(nn.Module):
         roi_pool = torchvision.ops.roi_pool(input=features,
                                             boxes=proposals,
                                             output_size=self.roi_size,
-                                            spatial_scale=0.03125)
+                                            spatial_scale=self.feature_to_image_scale)
 
 
         # apply hidden layers

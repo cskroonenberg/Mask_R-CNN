@@ -8,8 +8,8 @@ import torchvision
 from torchvision.models import ResNet50_Weights
 
 class MaskRCNN(nn.Module):
-    def __init__(self, img_size, roi_size, n_labels,
-                 pos_thresh=0.68, neg_thresh=0.30, hidden_dim=512, dropout=0.1, backbone='resnet50', device='cpu'):
+    def __init__(self, img_size, roi_size, n_labels, top_n,
+                 pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, hidden_dim=512, dropout=0.1, backbone='resnet50', device='cpu'):
         super().__init__()
 
         self.hyper_params = {
@@ -33,12 +33,13 @@ class MaskRCNN(nn.Module):
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
             self.backbone_size = (2048, 15, 20)
+            self.feature_to_image_scale = 0.03125
         else:
             raise NotImplementedError
 
         # initialize the RPN and classifier
-        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, self.backbone_size, hidden_dim, dropout)
-        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout)
+        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, device=device).to(device)
+        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout, device=device).to(device)
         self.mask_head = MaskHead(2048, num_classes=n_labels)
         self.mask_loss_fn = nn.BCELoss(reduction='none')
 
@@ -46,12 +47,13 @@ class MaskRCNN(nn.Module):
         features = self.backbone(images)
         
         # evaluate region proposal network
-        rpn_loss, proposals, labels, pos_inds_batch = self.rpn(features, images, truth_labels, truth_bboxes)
+        rpn_loss, proposals, assigned_labels = self.rpn(features, images, truth_labels, truth_bboxes)
+        print('rpn done')
 
-        proposals_by_batch = []
-        for idx in range(images.shape[0]):
-            batch_proposals = proposals[torch.where(pos_inds_batch == idx)[0]].detach().clone()
-            proposals_by_batch.append(batch_proposals)
+        # proposals_by_batch = []
+        # for idx in range(images.shape[0]):
+        #     batch_proposals = proposals[torch.where(pos_inds_batch == idx)[0]].detach().clone()
+        #     proposals_by_batch.append(batch_proposals)
 
         true_label_count = truth_labels.ne(-1).sum(dim=1)
         # print(f"true label count: {true_label_count}")
@@ -62,14 +64,19 @@ class MaskRCNN(nn.Module):
 
         # perform ROI align for Mask R-CNN
         rois = torchvision.ops.roi_align(input=features,
-                                         boxes=proposals_by_batch,
-                                         output_size=self.hyper_params["roi_size"])
+                                         boxes=proposals,
+                                         output_size=self.hyper_params["roi_size"],
+                                         spatial_scale=self.feature_to_image_scale)
+
+        print('roi done')
 
         # run classifier
         class_scores = self.classifier(rois)
 
         # calculate cross entropy loss
         class_loss = nn.functional.cross_entropy(class_scores, labels)
+
+        print('class done')
 
         # print(f"truth_bboxes.shape: {truth_bboxes.shape}")
         # print(f"truth_labels.shape: {truth_labels.shape}")

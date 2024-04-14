@@ -363,13 +363,15 @@ def boxes_to_delta(anchor_coords, pred_coords):
     return torch.stack([tx, ty, tw, th]).transpose(0, 1)
 
 
-def get_closest_label(proposals, bboxes, labels):
+def assign_class(proposals, bboxes, labels, iou_thresh=0.5):
     assigned_labels = []
     for idx, (proposal, bbox, label) in enumerate(zip(proposals, bboxes, labels)):
         bbox = bbox[torch.all((bbox != -1), dim=1), :]
         iou_set = torchvision.ops.box_iou(proposal, bbox) # iou matrix, (num proposal boxes) x (gt bboxes)
         _, best_indices_per_bbox = iou_set.max(dim=1)
+        # bg_mask = torch.all(iou_set < iou_thresh, dim=1)
         assigned_label = label[best_indices_per_bbox]
+        # assigned_label[bg_mask] = 0
         assigned_labels.append(assigned_label)
 
     return assigned_labels

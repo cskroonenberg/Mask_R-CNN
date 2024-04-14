@@ -1,4 +1,4 @@
-from networks.FRCRPN import FRCRPN_fasteronly
+from networks.FRCRPN import FRCRPN
 from networks.FRCClassifier import FRCClassifier_fasteronly
 
 import torch
@@ -8,7 +8,7 @@ from torchvision.models import ResNet50_Weights
 
 
 class FasterRCNN(nn.Module):
-    def __init__(self, img_size, roi_size, n_labels,
+    def __init__(self, img_size, roi_size, n_labels, top_n,
                  pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, hidden_dim=512, dropout=0.1, backbone='resnet50',
                  device='cpu'):
         super().__init__()
@@ -35,14 +35,13 @@ class FasterRCNN(nn.Module):
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
             self.backbone_size = (2048, 15, 20)
+            self.feature_to_image_scale = 0.03125
         else:
             raise NotImplementedError
 
         # initialize the RPN and classifier
-        self.rpn = FRCRPN_fasteronly(img_size, pos_thresh, neg_thresh, nms_thresh, self.backbone_size, hidden_dim, dropout,
-                          device=device).to(device)
-        self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, hidden_dim, dropout, device=device).to(
-            device)
+        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, device=device).to(device)
+        self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, self.feature_to_image_scale, hidden_dim, dropout, device=device).to(device)
 
     def forward(self, images, truth_labels, truth_bboxes):
         # with torch.no_grad():
@@ -61,7 +60,7 @@ class FasterRCNN(nn.Module):
 
         return rpn_loss + class_loss
 
-    def evaluate(self, images, confidence_thresh=0.8, nms_thresh=0.7):
+    def evaluate(self, images, confidence_thresh=0, nms_thresh=0.7):
         features = self.backbone(images)
 
         proposals_by_batch, scores = self.rpn.evaluate(features, images, confidence_thresh, nms_thresh)
@@ -77,5 +76,13 @@ class FasterRCNN(nn.Module):
             n = len(proposals)
             labels.append(preds[i: i + n])
             i += n
+
+        # final_proposals, final_scores, final_labels = [], [], []
+        # for (proposals, score, label) in zip(proposals_by_batch, scores, labels):
+        #     print(label)
+        #     fg_mask = (label != 0)
+        #     final_proposals.append(proposals[fg_mask])
+        #     final_scores.append(score[fg_mask])
+        #     final_labels.append(label[fg_mask])
 
         return proposals_by_batch, scores, labels
