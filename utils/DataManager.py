@@ -1,4 +1,5 @@
 import fiftyone.utils.coco as fouc
+import fiftyone as fo
 import fiftyone.zoo as foz
 import numpy as np
 import os
@@ -6,6 +7,7 @@ from PIL import Image
 import torch
 from torchvision.transforms.functional import pil_to_tensor
 from utils.FRCDataset import FRCDataset
+from utils.MRCDataset import MRCDataset
 
 
 """
@@ -13,7 +15,7 @@ This utility is adapted from: https://github.com/voxel51/fiftyone-examples/blob/
 """
 
 
-def load_data(dataset_name, num_train, num_val, img_size):
+def load_data(dataset_name, num_train, num_val, img_size, load_masks=False):
     """
     :type dataset_name: str
     :type num_train: int | None
@@ -26,12 +28,14 @@ def load_data(dataset_name, num_train, num_val, img_size):
     dataset_train = foz.load_zoo_dataset(
         dataset_name,
         splits=["train"],
-        max_samples=num_train
+        max_samples=num_train,
+        label_types=["segmentations"]
     )
     dataset_val = foz.load_zoo_dataset(
         dataset_name,
         splits=["validation"],
-        max_samples=num_val
+        max_samples=num_val,
+        label_types=["segmentations"]
     )
 
     # load in the id-to-string mapping and vice-versa
@@ -39,9 +43,11 @@ def load_data(dataset_name, num_train, num_val, img_size):
     id2str[-1] = "pad"
     str2id = {id2str[int_id]: int_id for int_id in id2str.keys()}
 
+    dataset = MRCDataset if load_masks else FRCDataset
+
     # parse the datasets
-    train_data = FRCDataset(dataset_train, img_size, str2id, 'Train')
-    val_data = FRCDataset(dataset_val, img_size, str2id, 'Validation')
+    train_data = dataset(dataset_train, img_size, str2id, 'Train')
+    val_data = dataset(dataset_val, img_size, str2id, 'Validation')
     return train_data, val_data, str2id, id2str
 
 
