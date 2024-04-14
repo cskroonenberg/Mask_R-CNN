@@ -42,7 +42,7 @@ class MaskRCNN(nn.Module):
         self.mask_head = MaskHead(2048, num_classes=n_labels)
         self.mask_loss_fn = nn.BCELoss(reduction='none')
 
-    def forward(self, images, truth_labels, truth_bboxes):
+    def forward(self, images, truth_labels, truth_bboxes, truth_masks):
         features = self.backbone(images)
         
         # evaluate region proposal network
@@ -52,6 +52,13 @@ class MaskRCNN(nn.Module):
         for idx in range(images.shape[0]):
             batch_proposals = proposals[torch.where(pos_inds_batch == idx)[0]].detach().clone()
             proposals_by_batch.append(batch_proposals)
+
+        true_label_count = truth_labels.ne(-1).sum(dim=1)
+        # print(f"true label count: {true_label_count}")
+
+        # print(f"len(proposals_by_batch): {len(proposals_by_batch)}")
+        # print(f"proposals_by_batch[0].shape: {proposals_by_batch[0].shape}")
+        # print(f"proposals_by_batch[1].shape: {proposals_by_batch[1].shape}")
 
         # perform ROI align for Mask R-CNN
         rois = torchvision.ops.roi_align(input=features,
@@ -64,9 +71,21 @@ class MaskRCNN(nn.Module):
         # calculate cross entropy loss
         class_loss = nn.functional.cross_entropy(class_scores, labels)
 
-        # TODO: FCN here and add to loss calculation
+        # print(f"truth_bboxes.shape: {truth_bboxes.shape}")
+        # print(f"truth_labels.shape: {truth_labels.shape}")
+        # print(f"truth_labels: {truth_labels}")
+        # print(f"rois.shape: {rois.shape}")
+        
         masks = self.mask_head(rois)
-        mask_loss = self.mask_loss_fn(masks, labels) # TODO is labels the right truth here?
+        
+        # TODO: Parse masks to only calculate loss on mask for ground truth class
+        # TODO: Remove padding from ground truth masks
+        
+        # print(f"masks.shape: {masks.shape}")
+        # print(f"truth_masks.shape: {truth_masks.shape}")
+        
+        # mask_loss = self.mask_loss_fn(masks, truth_masks)
+        mask_loss = 0
 
         return rpn_loss + class_loss + mask_loss
 
