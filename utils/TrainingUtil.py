@@ -16,6 +16,9 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
     model.train()
     loss_tracker = []
     best_epoch, best_loss, best_model = None, None, None
+    
+    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True, drop_last=True)
+    
     for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model'):
 
         if verbose:
@@ -24,10 +27,15 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
 
         # evaluate per batch
         loss = 0
-        images_batches, labels_batches, bboxes_batches = data.batches(batch_size)
-        for batch_idx in tqdm(range(len(images_batches)), disable=quiet):
+        for data in tqdm(dataloader, disable=quiet):
+            # Send data to CUDA device
+            for i, item in enumerate(data):
+                # Segmentation masks are not stored as Tensors because they are all different shapes
+                if isinstance(item, torch.Tensor):
+                    item.to(device)
+            
             # forward
-            epoch_loss = model(images_batches[batch_idx].to(device), labels_batches[batch_idx].to(device), bboxes_batches[batch_idx].to(device))
+            epoch_loss = model(*data)
 
             # backward
             optimizer.zero_grad()
@@ -37,7 +45,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
             loss += epoch_loss.item()
 
         # track loss
-        loss /= len(images_batches)
+        loss /= batch_size
         loss_tracker.append(loss)
         if verbose:
             print("  Training Loss: %.2f" % loss)
