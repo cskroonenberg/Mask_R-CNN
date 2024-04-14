@@ -9,7 +9,6 @@ from tqdm import tqdm
 
 
 def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', verbose=True, save=True):
-
     quiet = not verbose
 
     # training loop
@@ -29,11 +28,13 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
         loss = 0
         for data in tqdm(dataloader, disable=quiet):
             # Send data to CUDA device
+            data_device = []
             for i, item in enumerate(data):
                 # Segmentation masks are not stored as Tensors because they are all different shapes
                 if isinstance(item, torch.Tensor):
-                    item.to(device)
-            
+                    item = item.to(device)
+                data_device.append(item)
+            data = data_device
             # forward
             epoch_loss = model(*data)
 
