@@ -60,7 +60,7 @@ class FasterRCNN(nn.Module):
 
         return rpn_loss + class_loss
 
-    def evaluate(self, images, confidence_thresh=0, nms_thresh=0.7):
+    def evaluate(self, images, confidence_thresh=0.997, nms_thresh=0.7):
         features = self.backbone(images)
 
         proposals_by_batch, scores = self.rpn.evaluate(features, images, confidence_thresh, nms_thresh)

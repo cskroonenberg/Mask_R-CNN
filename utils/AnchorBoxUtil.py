@@ -183,21 +183,32 @@ def gen_k_center_anchors(sizes, aspect_ratios):
     :return: tensor of anchors, k x 4, in format x1, y1, x2, y2
     """
 
-    sizes = torch.as_tensor(sizes, dtype=torch.float32)
-    aspect_ratios = torch.as_tensor(aspect_ratios)
-    h_ratios = torch.sqrt(aspect_ratios)
+    # sizes = torch.as_tensor(sizes, dtype=torch.float32)
+    # aspect_ratios = torch.as_tensor(aspect_ratios)
+    # h_ratios = torch.sqrt(aspect_ratios)
+    # w_ratios = 1.0 / h_ratios
+    #
+    # h_ratios = h_ratios.unsqueeze(1)
+    # w_ratios = w_ratios.unsqueeze(1)
+    # sizes = sizes.unsqueeze(0)
+    #
+    # w = torch.matmul(w_ratios, sizes).reshape(-1)
+    # h = torch.matmul(h_ratios, sizes).reshape(-1)
+    #
+    # base_anchors = torch.stack([-w, -h, w, h], dim=1) / 2
+
+    sizes = np.array(sizes).reshape((1, -1))
+    aspect_ratios = np.array(aspect_ratios).reshape((-1, 1))
+    h_ratios = np.sqrt(aspect_ratios)
     w_ratios = 1.0 / h_ratios
 
-    h_ratios = h_ratios.unsqueeze(1)
-    w_ratios = w_ratios.unsqueeze(1)
-    sizes = sizes.unsqueeze(0)
+    w = w_ratios @ sizes
+    h = h_ratios @ sizes
+    w = w.flatten()
+    h = h.flatten()
 
-    w = torch.matmul(w_ratios, sizes).reshape(-1)
-    h = torch.matmul(h_ratios, sizes).reshape(-1)
-
-    base_anchors = torch.stack([-w, -h, w, h], dim=1) / 2
-    base_anchors = base_anchors
-    return base_anchors.round()
+    base_anchors = np.stack([-w, -h, w, h], axis=1) / 2
+    return base_anchors
 
 
 def get_anchors(img, features, k_center_anchors):
@@ -208,30 +219,52 @@ def get_anchors(img, features, k_center_anchors):
     :return: anchors corresponding to each input image, tensor (k * feature_W * feature_H) x 4
     """
 
+    k = k_center_anchors.shape[0]
+    # k_center_anchors_shifted = np.zeros((k, 4))
+    # k_center_anchors_shifted[:, 0:2] = -0.5 * k_center_anchors
+    # k_center_anchors_shifted[:, 2:4] = 0.5 * k_center_anchors
+
     image_h, image_w = img.shape[-2:]
     feature_h, feature_w = features.shape[-2:]
     image_interval_w = int(image_w / feature_w)
     image_interval_h = int(image_h / feature_h)
 
-    image_centers_w = torch.arange(0, feature_w) * image_interval_w
-    image_centers_h = torch.arange(0, feature_h) * image_interval_h
+    image_centers_w = np.arange(feature_w) * image_interval_w
+    image_centers_h = np.arange(feature_h) * image_interval_h
+    image_centers = np.array(np.meshgrid(image_centers_h, image_centers_w)).transpose([2, 1, 0])
 
-    image_centers_w, image_centers_h = torch.meshgrid(image_centers_w, image_centers_h, indexing='ij')
+    image_centers = np.tile(image_centers, reps=2)
+    image_centers = np.tile(image_centers, reps=k)
+    anchors = (image_centers + k_center_anchors.flatten())
+    anchors = anchors.reshape(-1, 4)
+    # anchor_within_image_mask = np.all((anchors[:, 0:2] >= [0, 0]) & (anchors[:, 2:4] <= [image_h, image_w]), axis=1)
+    anchors = torch.tensor(anchors, dtype=torch.float32)
 
-    image_centers_w = image_centers_w.reshape(-1)
-    image_centers_h = image_centers_h.reshape(-1)
 
-    image_centers = torch.stack([image_centers_w, image_centers_h, image_centers_w, image_centers_h], dim=1)
+    # image_h, image_w = img.shape[-2:]
+    # feature_h, feature_w = features.shape[-2:]
+    # image_interval_w = int(image_w / feature_w)
+    # image_interval_h = int(image_h / feature_h)
+    #
+    # image_centers_w = torch.arange(0, feature_w) * image_interval_w
+    # image_centers_h = torch.arange(0, feature_h) * image_interval_h
+    #
+    # image_centers_w, image_centers_h = torch.meshgrid(image_centers_w, image_centers_h)
+    #
+    # image_centers_w = image_centers_w.reshape(-1)
+    # image_centers_h = image_centers_h.reshape(-1)
+    #
+    # image_centers = torch.stack([image_centers_w, image_centers_h, image_centers_w, image_centers_h], dim=1)
+    #
+    # k = k_center_anchors.shape[0]
+    # num_centers = image_centers.shape[0]
+    #
+    # image_centers = image_centers.repeat_interleave(k, dim=0)
+    # k_center_anchors = k_center_anchors.repeat(num_centers, 1)
+    #
+    # anchors = image_centers + k_center_anchors
 
-    k = k_center_anchors.shape[0]
-    num_centers = image_centers.shape[0]
-
-    image_centers = image_centers.repeat_interleave(k, dim=0)
-    k_center_anchors = k_center_anchors.repeat(num_centers, 1)
-
-    anchors = image_centers + k_center_anchors
-
-    return anchors
+    return anchors #, anchor_within_image_mask
 
 
 def get_anchors_batch(img_all, sizes, aspect_ratios, features_all, device='cpu'):
@@ -249,13 +282,13 @@ def get_anchors_batch(img_all, sizes, aspect_ratios, features_all, device='cpu')
     anchors = get_anchors(img_all[0, :, :, :], features_all[0, :, :, :], k_center_anchors)
     anchors = anchors.unsqueeze(0).repeat(batch_size, 1, 1).to(device)
 
-    return anchors
+    return anchors #, anchor_within_image_mask
 
 
 def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_labels, pos_thresh=0.7, neg_thresh=0.3, output_batch=128, pos_fraction=0.5, device='cpu'):
 
-    num_pos = int(output_batch * pos_fraction)
-    num_neg = output_batch - num_pos
+    # num_pos = int(output_batch * pos_fraction)
+    # num_neg = output_batch - num_pos
 
     # evaluate IoUs
     pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets, pos_anchors = [], [], [], [], [], []
@@ -270,6 +303,7 @@ def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_la
         iou_max_per_label, _ = iou_set.max(dim=0, keepdim=True)
         iou_max_per_bbox, pos_indices_per_bbox = iou_set.max(dim=1, keepdim=True)
 
+
         # "positive" consists of any anchor box that is (at least) one of:
         # 1. the max IoU and a ground truth box
         # 2. above our threshold
@@ -277,29 +311,35 @@ def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_la
         pos_mask = torch.logical_or(pos_mask, iou_set > pos_thresh)
         pos_inds_flat = torch.where(pos_mask)[0]
 
-        if len(pos_inds_flat) > num_pos:
-            # from pos_inds_flat, randomly sample num_pos samples without replacement
-            rand_idx_pos = torch.randperm(len(pos_inds_flat))
-            pos_inds_flat = pos_inds_flat[rand_idx_pos][0 : num_pos]
-            pos_coord_inds.append(pos_inds_flat)
-        else:
-            # take all positive samples
-            pos_coord_inds.append(pos_inds_flat)
+        pos_coord_inds.append(pos_inds_flat)
+
+        # if len(pos_inds_flat) > num_pos:
+        #     # from pos_inds_flat, randomly sample num_pos samples without replacement
+        #     rand_idx_pos = torch.randperm(len(pos_inds_flat))
+        #     pos_inds_flat = pos_inds_flat[rand_idx_pos][0 : num_pos]
+        #     pos_coord_inds.append(pos_inds_flat)
+        # else:
+        #     # take all positive samples
+        #     pos_coord_inds.append(pos_inds_flat)
 
         # "negative" consists of any anchor box whose max is below the threshold
         neg_mask = iou_max_per_bbox < neg_thresh
         neg_inds_flat = torch.where(neg_mask)[0]
 
-        if len(pos_inds_flat) > num_pos:
-            # from neg_inds_flat, randomly sample num_neg samples without replacement
-            rand_idx_neg = torch.randperm(len(neg_inds_flat))
-            neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : num_neg]
-            neg_coord_inds.append(neg_inds_flat)
-        else:
-            # pad with negative samples
-            rand_idx_neg = torch.randperm(len(neg_inds_flat))
-            neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : (num_neg + num_pos - len(pos_inds_flat))]
-            neg_coord_inds.append(neg_inds_flat)
+        rand_idx_neg = torch.randperm(len(neg_inds_flat))
+        neg_inds_flat = neg_inds_flat[rand_idx_neg][0: len(pos_inds_flat)]
+        neg_coord_inds.append(neg_inds_flat)
+
+        # if len(pos_inds_flat) > num_pos:
+        #     # from neg_inds_flat, randomly sample num_neg samples without replacement
+        #     rand_idx_neg = torch.randperm(len(neg_inds_flat))
+        #     neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : num_neg]
+        #     neg_coord_inds.append(neg_inds_flat)
+        # else:
+        #     # pad with negative samples
+        #     rand_idx_neg = torch.randperm(len(neg_inds_flat))
+        #     neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : (num_neg + num_pos - len(pos_inds_flat))]
+        #     neg_coord_inds.append(neg_inds_flat)
 
         # get the IoU scores
         pos_scores.append(iou_max_per_bbox[pos_inds_flat])
@@ -315,7 +355,6 @@ def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_la
         pos_anchors.append(anchor_bboxes[pos_inds_flat])
 
     return pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets, pos_anchors
-
 
 def delta_to_boxes(rpn_delta, anchors):
     """
