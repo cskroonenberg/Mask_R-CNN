@@ -47,7 +47,7 @@ class MaskRCNN(nn.Module):
         features = self.backbone(images)
         
         # evaluate region proposal network
-        rpn_loss, proposals, assigned_labels = self.rpn(features, images, truth_labels, truth_bboxes)
+        rpn_loss, proposals, assigned_labels, _ = self.rpn(features, images, truth_labels, truth_bboxes)
         print('rpn done')
 
         # proposals_by_batch = []

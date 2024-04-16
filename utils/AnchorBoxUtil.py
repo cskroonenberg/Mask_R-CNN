@@ -216,7 +216,7 @@ def get_anchors(img, features, k_center_anchors):
     image_centers_w = torch.arange(0, feature_w) * image_interval_w
     image_centers_h = torch.arange(0, feature_h) * image_interval_h
 
-    image_centers_w, image_centers_h = torch.meshgrid(image_centers_w, image_centers_h)
+    image_centers_w, image_centers_h = torch.meshgrid(image_centers_w, image_centers_h, indexing='ij')
 
     image_centers_w = image_centers_w.reshape(-1)
     image_centers_h = image_centers_h.reshape(-1)
@@ -269,7 +269,6 @@ def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_la
         # get the max per category
         iou_max_per_label, _ = iou_set.max(dim=0, keepdim=True)
         iou_max_per_bbox, pos_indices_per_bbox = iou_set.max(dim=1, keepdim=True)
-
 
         # "positive" consists of any anchor box that is (at least) one of:
         # 1. the max IoU and a ground truth box

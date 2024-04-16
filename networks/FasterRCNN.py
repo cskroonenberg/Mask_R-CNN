@@ -48,7 +48,7 @@ class FasterRCNN(nn.Module):
         features = self.backbone(images)
 
         # evaluate region proposal network
-        rpn_loss, proposals, assigned_labels = self.rpn(features, images, truth_labels, truth_bboxes)
+        rpn_loss, proposals, assigned_labels, truth_deltas = self.rpn(features, images, truth_labels, truth_bboxes)
 
         # proposals_by_batch = []
         # for idx in range(images.shape[0]):
@@ -56,7 +56,7 @@ class FasterRCNN(nn.Module):
         #     proposals_by_batch.append(batch_proposals)
 
         # run classifier
-        class_loss = self.classifier(features, proposals, assigned_labels)
+        class_loss = self.classifier(features, proposals, assigned_labels, truth_deltas)
 
         return rpn_loss + class_loss
 

@@ -70,6 +70,7 @@ class FRCRPN(nn.Module):
         total_loss = 0
         top_proposals = []
         top_confidences = []
+        truth_deltas = []
 
         for i in range(batch_size):
 
@@ -97,15 +98,18 @@ class FRCRPN(nn.Module):
             nms_mask = torchvision.ops.nms(proposal, confidence_i, self.nms_thresh)
             proposal = proposal[nms_mask]
             confidence_i = confidence_i[nms_mask]
-            top_confidence, top_indicies = torch.topk(confidence_i.detach(), self.top_n, dim=0)
-            proposal = proposal[top_indicies]
+            anchors = anchors_single[nms_mask]
+            top_confidence, top_indices = torch.topk(confidence_i.detach(), self.top_n, dim=0)
+            proposal = proposal[top_indices]
+            anchors = anchors[top_indices]
 
             top_confidences.append(top_confidence)
             top_proposals.append(proposal.detach())
+            truth_deltas.append(AnchorBoxUtil.boxes_to_delta(proposal, anchors))
 
         assigned_labels = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, iou_thresh=0.5)
 
-        return total_loss, top_proposals, assigned_labels
+        return total_loss, top_proposals, assigned_labels, truth_deltas
 
     def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):
         batch_size = images.shape[0]

@@ -31,11 +31,13 @@ class FRCClassifier(nn.Module):
 
         return scores
 
+
 class FRCClassifier_fasteronly(nn.Module):
     def __init__(self, roi_size, backbone_size, n_labels, feature_to_image_scale, hidden_dim=512, dropout=0.1, device='cpu'):
         super().__init__()
         self.roi_size = roi_size
         self.feature_to_image_scale = feature_to_image_scale
+        self.device = device
 
         # hidden
         self.hidden = nn.Sequential(
@@ -47,9 +49,12 @@ class FRCClassifier_fasteronly(nn.Module):
         ).to(device)
 
         # classifier
-        self.classifier = nn.Linear(hidden_dim, n_labels+1).to(device)
+        self.classifier = nn.Linear(hidden_dim, n_labels + 1).to(device)
 
-    def forward(self, features, proposals, labels):
+        # box regression
+        self.box_regressor = nn.Linear(hidden_dim, 4 * (n_labels + 1)).to(device)
+
+    def forward(self, features, proposals, assigned_labels, truth_deltas):
 
         # perform ROI pooling
         roi_pool = torchvision.ops.roi_pool(input=features,
@@ -57,19 +62,28 @@ class FRCClassifier_fasteronly(nn.Module):
                                             output_size=self.roi_size,
                                             spatial_scale=self.feature_to_image_scale)
 
-
         # apply hidden layers
         out = self.hidden(roi_pool)
 
-        # classification scores
-        scores = self.classifier(out)
-
-        labels = torch.cat(labels, dim=0)
+        # classification scores/loss
+        class_scores = self.classifier(out)
+        assigned_labels = torch.cat(assigned_labels, dim=0)
 
         # calculate cross entropy loss
-        loss = nn.functional.cross_entropy(scores, labels)
+        class_loss = nn.functional.cross_entropy(class_scores, assigned_labels)
 
-        return loss
+        # box regression scores
+        box_reg_scores = self.box_regressor(out)
+
+        # determine truth deltas/masks for box regression
+        truth_delta_masks = torch.zeros_like(box_reg_scores, dtype=torch.bool).to(self.device)
+        for i, label in enumerate(assigned_labels):
+            truth_delta_masks[i, (4 * label):(4 * label + 4)] = 1
+
+        # calculate box regression loss
+        box_reg_loss = self.box_regression_loss(box_reg_scores, truth_deltas, truth_delta_masks)
+
+        return class_loss + box_reg_loss
 
     def evaluate(self, features, proposals):
 
@@ -86,3 +100,11 @@ class FRCClassifier_fasteronly(nn.Module):
         scores = self.classifier(out)
 
         return scores
+
+    @staticmethod
+    def box_regression_loss(box_reg_scores, truth_deltas, truth_delta_masks, scale=1.0, sigma=1.0):
+        x = box_reg_scores[truth_delta_masks].detach() - torch.cat(truth_deltas).flatten()
+        loss_type_mask = torch.abs(x) < 1
+        loss_1 = 0.5 * torch.pow(x[loss_type_mask], 2).sum()  # 0.5x^2 if |x| < 1
+        loss_2 = torch.sum(torch.abs(x[~loss_type_mask]) - 0.5)  # |x| - 0.5 otherwise
+        return (loss_1 + loss_2) / box_reg_scores.shape[0]
