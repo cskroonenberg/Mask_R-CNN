@@ -77,7 +77,7 @@ class FRCClassifier_fasteronly(nn.Module):
         roi_pool = torchvision.ops.roi_pool(input=features,
                                             boxes=proposals,
                                             output_size=self.roi_size,
-                                            spatial_scale=0.03125)
+                                            spatial_scale=self.feature_to_image_scale)
 
         # apply hidden layers
         out = self.hidden(roi_pool)

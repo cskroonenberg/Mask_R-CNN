@@ -89,8 +89,8 @@ class FRCRPN(nn.Module):
             # calculate loss
             target = torch.cat((torch.ones_like(pos_confidence), torch.zeros_like(neg_confidence)))
             scores = torch.cat((pos_confidence, neg_confidence))
-            class_loss = self.ce_loss(scores, target) / target.shape[0]
-            bbox_loss = self.l1_loss(pos_offset, pos_regression) / regression.shape[1] * 10
+            class_loss = self.ce_loss(scores, target) # / target.shape[0]
+            bbox_loss = self.l1_loss(pos_offset, pos_regression) # / regression.shape[1] * 10
             total_loss = total_loss + class_loss + bbox_loss
 
             proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
@@ -101,7 +101,7 @@ class FRCRPN(nn.Module):
             proposal = proposal[top_indicies]
 
             top_confidences.append(top_confidence)
-            top_proposals.append(proposal)
+            top_proposals.append(proposal.detach())
 
         assigned_labels = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, iou_thresh=0.5)
 

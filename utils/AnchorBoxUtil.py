@@ -372,6 +372,6 @@ def assign_class(proposals, bboxes, labels, iou_thresh=0.5):
         # bg_mask = torch.all(iou_set < iou_thresh, dim=1)
         assigned_label = label[best_indices_per_bbox]
         # assigned_label[bg_mask] = 0
-        assigned_labels.append(assigned_label)
+        assigned_labels.append(assigned_label.detach())
 
     return assigned_labels
