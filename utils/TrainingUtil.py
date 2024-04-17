@@ -3,6 +3,7 @@ import datetime
 import matplotlib.pyplot as plt
 import os
 from pathlib import Path
+import sys
 import torch
 import time
 from tqdm import tqdm
@@ -18,7 +19,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
     
     dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True, drop_last=True)
     
-    for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model'):
+    for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model', file=sys.stdout):
 
         if verbose:
             print("-" * 60)
@@ -26,7 +27,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
 
         # evaluate per batch
         loss = 0
-        for data in tqdm(dataloader, disable=quiet):
+        for data in tqdm(dataloader, disable=quiet, file=sys.stdout):
             # Send data to CUDA device
             data_device = []
             for i, item in enumerate(data):

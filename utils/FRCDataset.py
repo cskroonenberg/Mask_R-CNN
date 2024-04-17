@@ -1,7 +1,7 @@
 import albumentations
 import numpy as np
 from PIL import Image
-import random
+import sys
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
@@ -34,7 +34,7 @@ class FRCDataset(Dataset):
                                            bbox_params=albumentations.BboxParams(format='pascal_voc'))
 
         images, labels, bboxes = [], [], []
-        for image_id, file_path in enumerate(tqdm(dataset.values("filepath"), desc="Pre-processing [{}] Dataset".format(self.dataset_type))):
+        for image_id, file_path in enumerate(tqdm(dataset.values("filepath"), desc="Pre-processing [{}] Dataset".format(self.dataset_type), file=sys.stdout)):
             # load the image data and convert it to a tensor
             pil_img = Image.open(file_path).convert("RGB")
             img_data = pil_to_tensor(pil_img).type(torch.float32)
