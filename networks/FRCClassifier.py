@@ -53,6 +53,7 @@ class FRCClassifier_fasteronly(nn.Module):
 
         # box regression
         self.box_regressor = nn.Linear(hidden_dim, 4 * (n_labels + 1)).to(device)
+        self.box_reg_loss = nn.SmoothL1Loss(reduction='mean')
 
     def forward(self, features, proposals, assigned_labels, truth_deltas):
 
@@ -81,7 +82,7 @@ class FRCClassifier_fasteronly(nn.Module):
             truth_delta_masks[i, (4 * label):(4 * label + 4)] = 1
 
         # calculate box regression loss
-        box_reg_loss = self.box_regression_loss(box_reg_scores, truth_deltas, truth_delta_masks)
+        box_reg_loss = self.box_reg_loss(box_reg_scores[truth_delta_masks].detach(), torch.cat(truth_deltas).flatten())
 
         return class_loss + box_reg_loss
 

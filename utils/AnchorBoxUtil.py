@@ -403,6 +403,7 @@ def boxes_to_delta(anchor_coords, pred_coords):
 
 def assign_class(proposals, bboxes, labels, iou_thresh=0.5):
     assigned_labels = []
+    truth_deltas = []
     for idx, (proposal, bbox, label) in enumerate(zip(proposals, bboxes, labels)):
         bbox = bbox[torch.all((bbox != -1), dim=1), :]
         iou_set = torchvision.ops.box_iou(proposal, bbox) # iou matrix, (num proposal boxes) x (gt bboxes)
@@ -411,5 +412,11 @@ def assign_class(proposals, bboxes, labels, iou_thresh=0.5):
         assigned_label = label[best_indices_per_bbox]
         # assigned_label[bg_mask] = 0
         assigned_labels.append(assigned_label.detach())
+        truth_deltas.append(boxes_to_delta(proposal, bbox[best_indices_per_bbox]))
 
-    return assigned_labels
+    return assigned_labels, truth_deltas
+
+
+def generate_size_mask(proposal, min_w=5, min_h=5):
+    proposal_cwh = torchvision.ops.box_convert(proposal, in_fmt='xyxy', out_fmt='cxcywh')
+    return torch.logical_and(proposal_cwh[:, 2] > min_w, proposal_cwh[:, 3] > min_h)

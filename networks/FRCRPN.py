@@ -70,7 +70,6 @@ class FRCRPN(nn.Module):
         total_loss = 0
         top_proposals = []
         top_confidences = []
-        truth_deltas = []
 
         for i in range(batch_size):
 
@@ -95,19 +94,19 @@ class FRCRPN(nn.Module):
             total_loss = total_loss + class_loss + bbox_loss
 
             proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
+            size_mask = AnchorBoxUtil.generate_size_mask(proposal)
+            proposal = proposal[size_mask]
+            confidence_i = confidence_i[size_mask]
             nms_mask = torchvision.ops.nms(proposal, confidence_i, self.nms_thresh)
             proposal = proposal[nms_mask]
             confidence_i = confidence_i[nms_mask]
-            anchors = anchors_single[nms_mask]
             top_confidence, top_indices = torch.topk(confidence_i.detach(), self.top_n, dim=0)
             proposal = proposal[top_indices]
-            anchors = anchors[top_indices]
 
             top_confidences.append(top_confidence)
             top_proposals.append(proposal.detach())
-            truth_deltas.append(AnchorBoxUtil.boxes_to_delta(proposal, anchors))
 
-        assigned_labels = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, iou_thresh=0.5)
+        assigned_labels, truth_deltas = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, iou_thresh=0.5)
 
         return total_loss, top_proposals, assigned_labels, truth_deltas
 
