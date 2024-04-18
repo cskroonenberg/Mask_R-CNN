@@ -9,15 +9,16 @@ import time
 from tqdm import tqdm
 
 
-def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', verbose=True, save=True):
+def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, device='cpu', verbose=True, save=True):
     quiet = not verbose
 
     # training loop
     model.train()
     loss_tracker = []
+    val_loss_tracker = []
     best_epoch, best_loss, best_model = None, None, None
     
-    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True, drop_last=True)
+    dataloader = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, drop_last=True)
     
     for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model', file=sys.stdout):
 
@@ -46,11 +47,19 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
 
             loss += epoch_loss.item()
 
+        # compute validation loss
+        model.eval()
+        with torch.no_grad():
+            val_loss = model(data_val.images.to(device), data_val.labels.to(device), data_val.bboxes.to(device))
+            val_loss_item = val_loss.item() / data_val.n_samples
+        model.train()
+
         # track loss
-        loss /= batch_size
+        loss /= data_train.n_samples
         loss_tracker.append(loss)
+        val_loss_tracker.append(val_loss_item)
         if verbose:
-            print("  Training Loss: %.2f" % loss)
+            print("  Training Loss: %.2f, Validation Loss %.2f" % (loss, val_loss_item))
 
         # save the best model TODO: implement validation loss for this criteria
         if (best_loss is None) or (loss < best_loss):
@@ -74,7 +83,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
         save_properties(model, optimizer, base_dir)
 
         # save the loss curve
-        save_loss_curve(loss_tracker, base_dir, save_timestamp)
+        save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp)
 
         print("Model, properties, and results saved to: {}".format(base_dir))
     return loss_tracker
@@ -96,13 +105,15 @@ def save_properties(model, optimizer, base_dir):
     props_file.close()
 
 
-def save_loss_curve(loss_tracker, base_dir, save_timestamp):
+def save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp):
     loss_filename = os.path.join(base_dir, "loss_{}.png".format(save_timestamp))
 
     plt.cla()
-    plt.plot(loss_tracker)
+    plt.plot(loss_tracker, label='Training')
+    plt.plot(val_loss_tracker, label='Validation')
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.grid(True)
+    plt.legend()
     plt.savefig(loss_filename)
     plt.cla()
