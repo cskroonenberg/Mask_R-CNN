@@ -78,7 +78,6 @@ class FRCClassifier_fasteronly(nn.Module):
         box_reg_scores = self.box_regressor(out)
         box_reg_scores_fg = box_reg_scores[fg_mask, :]
 
-
         # determine truth deltas/masks for box regression
         truth_delta_masks = torch.zeros_like(box_reg_scores, dtype=torch.bool).to(self.device)
         for i, label in enumerate(assigned_labels):

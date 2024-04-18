@@ -62,9 +62,9 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
             print("  Training Loss: %.2f, Validation Loss %.2f" % (loss, val_loss_item))
 
         # save the best model TODO: implement validation loss for this criteria
-        if (best_loss is None) or (loss < best_loss):
+        if (best_loss is None) or (val_loss_item < best_loss):
             best_epoch = i
-            best_loss = loss
+            best_loss = val_loss_item
             best_model = deepcopy(model.state_dict())
 
     if save:
