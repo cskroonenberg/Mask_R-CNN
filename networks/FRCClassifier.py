@@ -20,7 +20,7 @@ class FRCClassifier(nn.Module):
         ).to(device)
 
         # classifier
-        self.classifier = nn.Linear(hidden_dim, n_labels).to(device)
+        self.classifier = nn.Linear(hidden_dim, n_labels+1).to(device)
 
     def forward(self, rois):
         # apply hidden layers

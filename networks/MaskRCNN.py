@@ -29,7 +29,7 @@ class MaskRCNN(nn.Module):
             # resnet backbone
             model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)
             req_layers = list(model.children())[:8]
-            self.backbone = nn.Sequential(*req_layers)
+            self.backbone = nn.Sequential(*req_layers).to(device)
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
             self.backbone_size = (2048, 15, 20)
@@ -40,61 +40,120 @@ class MaskRCNN(nn.Module):
         # initialize the RPN and classifier
         self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, device=device).to(device)
         self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout, device=device).to(device)
-        self.mask_head = MaskHead(2048, num_classes=n_labels)
-        self.mask_loss_fn = nn.BCELoss(reduction='none')
+        self.mask_head = MaskHead(2048, num_classes=n_labels).to(device)
+        self.mask_loss_fn = nn.BCELoss().to(device)
+
+    def unpack_mask_truth(self, truth_masks):
+        valid_masks = []
+        for i in range(truth_masks.shape[0]):  # Iterate over images
+            num_valid_masks = 0
+            for j in range(truth_masks.shape[1]):  # Iterate over masks
+                if torch.all(truth_masks[i, j] == -1):
+                    break
+                # print(f"truth_masks[{i}, {j}].shape: {truth_masks[i, j].shape}")
+                # print(f"torch.where(truth_masks[i, j, 0] == -1): {torch.where(truth_masks[i, j, 0] == -1)}")
+                # print(f"torch.where(truth_masks[i, j, 0] == -1)[0].shape: {torch.where(truth_masks[i, j, 0] == -1)[0].shape}")
+                # print(f"truth_masks[{i}, {j}, 0]: {truth_masks[i, j, 0]}")
+                last_row = torch.where(truth_masks[i, j, 0] == -1)[0][0] if len(torch.where(truth_masks[i, j, 0] == -1)[0]) > 0 else truth_masks.shape[2]
+                last_col = torch.where(truth_masks[i, j, :, 0] == -1)[0][0] if len(torch.where(truth_masks[i, j, :, 0] == -1)[0]) > 0 else truth_masks.shape[3]
+                
+                # print(f"torch.unique(truth_masks[i,j]): {torch.unique(truth_masks[i,j])}")
+                # import cv2
+                # import numpy as np
+                # img = truth_masks[i,j].numpy() + 1
+                # cv2.imwrite("full_mask.jpg", (img*127).astype(np.uint8))
+                # img = truth_masks[i,j, :last_col, :last_row].numpy() + 1
+                # cv2.imwrite("mask.jpg", (img*127).astype(np.uint8))
+                # print(f"torch.unique(truth_masks[i,j, :last_col, :last_row]): {torch.unique(truth_masks[i,j, :last_col, :last_row])}")
+                
+                # print(f"truth_masks[i,j, :last_col, :last_row].shape: {truth_masks[i,j, :last_col, :last_row].shape}")
+                
+                # Sum the values of the mask to count the number of -1 entries
+                # num_minus_ones = torch.sum((truth_masks[i,j] == -1)).item()
+                # print("Number of -1 entries:", num_minus_ones)
+
+                # num_minus_ones = torch.sum((truth_masks[i,j, :last_col, :last_row] == -1)).item()
+                # print("Number of -1 entries (post-mask):", num_minus_ones)
+                
+                # num_minus_ones = torch.sum((truth_masks[i,j, :last_col+1, :last_row+1] == -1)).item()
+                # print("Number of -1 entries (post-irony):", num_minus_ones)
+                # img_masks.append(truth_masks[i, j, :last_col, :last_row])
+                # print(f"truth_masks[i, j, :last_col, :last_row].shape: {truth_masks[i, j, :last_col, :last_row].shape}")
+                # print(f"truth_masks[i, j, :last_col, :last_row].unsqueeze(0).unsqueeze(0).shape: {truth_masks[i, j, :last_col, :last_row].unsqueeze(0).unsqueeze(0).shape}")
+                valid_masks.append(torch.nn.functional.interpolate(truth_masks[i, j, :last_col, :last_row].unsqueeze(0).unsqueeze(0), size=self.hyper_params['roi_size']).squeeze())
+                # quit()
+                num_valid_masks += 1
+            # valid_masks.append(img_masks)
+            
+        return torch.stack(valid_masks)
+
+    def unpack_bbox_truth(self, truth_bboxes):
+        valid_bboxes = []
+        for i, bboxes in enumerate(truth_bboxes):
+            img_bboxes = []
+            for j in range(len(bboxes)):
+                if torch.all(bboxes[j] == -1):
+                    break
+                img_bboxes.append(bboxes[j])
+            # print(f"img {i} - {len(img_bboxes)} gt bboxes")
+            valid_bboxes.append(torch.stack(img_bboxes).type('torch.FloatTensor'))
+                
+        return valid_bboxes
+
+    def unpack_label_truth(self, truth_labels):
+        valid_labels = []
+        for labels in truth_labels:
+            last_idx = torch.where(labels == -1)[0][0] if len(torch.where(labels == -1)[0]) > 0 else truth_labels.shape[1]
+            for label in labels[:last_idx]:
+                valid_labels.append(label-1)
+                
+        return torch.stack(valid_labels).int()
 
     def forward(self, images, truth_labels, truth_bboxes, truth_masks):
         features = self.backbone(images)
         
         # evaluate region proposal network
         rpn_loss, proposals, assigned_labels, _ = self.rpn(features, images, truth_labels, truth_bboxes)
-        print('rpn done')
 
-        # proposals_by_batch = []
-        # for idx in range(images.shape[0]):
-        #     batch_proposals = proposals[torch.where(pos_inds_batch == idx)[0]].detach().clone()
-        #     proposals_by_batch.append(batch_proposals)
-
-        true_label_count = truth_labels.ne(-1).sum(dim=1)
-        # print(f"true label count: {true_label_count}")
-
-        # print(f"len(proposals_by_batch): {len(proposals_by_batch)}")
-        # print(f"proposals_by_batch[0].shape: {proposals_by_batch[0].shape}")
-        # print(f"proposals_by_batch[1].shape: {proposals_by_batch[1].shape}")
 
         # perform ROI align for Mask R-CNN
-        rois = torchvision.ops.roi_align(input=features,
+        proposed_rois = torchvision.ops.roi_align(input=features,
                                          boxes=proposals,
                                          output_size=self.hyper_params["roi_size"],
                                          spatial_scale=self.feature_to_image_scale)
-
-        print('roi done')
-
+        
+        gt_bboxes = self.unpack_bbox_truth(truth_bboxes)
+        
+        gt_rois = torchvision.ops.roi_align(input=features,
+                                         boxes=gt_bboxes,
+                                         output_size=self.hyper_params["roi_size"],
+                                         spatial_scale=self.feature_to_image_scale)
+        
         # run classifier
-        class_scores = self.classifier(rois)
+        proposed_class_scores = self.classifier(proposed_rois)
+        assigned_labels = torch.cat(assigned_labels, dim=0)
 
         # calculate cross entropy loss
-        class_loss = nn.functional.cross_entropy(class_scores, labels)
+        class_loss = nn.functional.cross_entropy(proposed_class_scores, assigned_labels)
 
-        print('class done')
+        # TODO: Use proposed masks for inference
+        # proposed_masks = self.mask_head(proposed_rois)
+        gt_pred_masks = self.mask_head(gt_rois)
+        
+        gt_masks = self.unpack_mask_truth(truth_masks)
+        
+        valid_labels = self.unpack_label_truth(truth_labels)
+        gt_pred_masks = gt_pred_masks[torch.arange(gt_pred_masks.size(0)), valid_labels]
+        
+        mask_loss = self.mask_loss_fn(gt_pred_masks, gt_masks)
 
-        # print(f"truth_bboxes.shape: {truth_bboxes.shape}")
-        # print(f"truth_labels.shape: {truth_labels.shape}")
-        # print(f"truth_labels: {truth_labels}")
-        # print(f"rois.shape: {rois.shape}")
-        
-        masks = self.mask_head(rois)
-        
-        # TODO: Parse masks to only calculate loss on mask for ground truth class
-        # TODO: Remove padding from ground truth masks
-        
-        # print(f"masks.shape: {masks.shape}")
-        # print(f"truth_masks.shape: {truth_masks.shape}")
-        
-        # mask_loss = self.mask_loss_fn(masks, truth_masks)
-        mask_loss = 0
+        total_loss = rpn_loss + class_loss + mask_loss
 
-        return rpn_loss + class_loss + mask_loss
+        # print(f"total_loss: {total_loss}")
+        # print(f"\trpn: {rpn_loss} cl: {class_loss} msk: {mask_loss}")
+
+        return total_loss
+
 
     def evaluate(self, images, confidence_thresh=0.5, nms_thresh=0.7):
         features = self.backbone(images)
