@@ -6,6 +6,8 @@ import torch.nn as nn
 import torchvision
 from torchvision.models import ResNet50_Weights
 
+from utils import AnchorBoxUtil
+
 
 class FasterRCNN(nn.Module):
     def __init__(self, img_size, roi_size, n_labels, top_n,
@@ -60,29 +62,43 @@ class FasterRCNN(nn.Module):
 
         return rpn_loss + class_loss
 
-    def evaluate(self, images, confidence_thresh=0.997, nms_thresh=0.7):
+    def evaluate(self, images, confidence_thresh=0.9, nms_thresh=0.7, device='cpu'):
         features = self.backbone(images)
 
         proposals_by_batch, scores = self.rpn.evaluate(features, images, confidence_thresh, nms_thresh)
-        class_scores = self.classifier.evaluate(features, proposals_by_batch)
+        class_scores, box_deltas = self.classifier.evaluate(features, proposals_by_batch)
 
         # evaluate using softmax
         p = nn.functional.softmax(class_scores, dim=-1)
         preds = p.argmax(dim=-1)
 
         labels = []
+        box_deltas_list = []
         i = 0
         for proposals in proposals_by_batch:
             n = len(proposals)
             labels.append(preds[i: i + n])
+            box_deltas_list.append(box_deltas[i: i + n, :])
             i += n
 
-        # final_proposals, final_scores, final_labels = [], [], []
-        # for (proposals, score, label) in zip(proposals_by_batch, scores, labels):
-        #     print(label)
-        #     fg_mask = (label != 0)
-        #     final_proposals.append(proposals[fg_mask])
-        #     final_scores.append(score[fg_mask])
-        #     final_labels.append(label[fg_mask])
+        final_proposals, final_labels = [], []
+        for (proposals, label, deltas, score) in zip(proposals_by_batch, labels, box_deltas_list, scores):
+            fg_mask = (label != 0)
+            proposals = proposals[fg_mask, :]
+            deltas = deltas[fg_mask, :]
+            label = label[fg_mask]
+            score = score[fg_mask]
 
-        return proposals_by_batch, scores, labels
+            truth_deltas = torch.zeros((label.shape[0], 4)).to(device)
+            for i in range(label.shape[0]):
+                gt = label[i]
+                truth_deltas[i, :] = deltas[i, (4 * gt):(4 * gt + 4)]
+
+            final_proposal = AnchorBoxUtil.delta_to_boxes(truth_deltas, proposals)
+
+            nms_mask = torchvision.ops.nms(final_proposal, score, nms_thresh)
+
+            final_proposals.append(final_proposal[nms_mask])
+            final_labels.append(label[nms_mask])
+
+        return final_proposals, final_labels #proposals_by_batch, scores, labels

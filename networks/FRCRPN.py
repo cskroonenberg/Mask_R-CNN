@@ -50,27 +50,29 @@ class FRCRPN(nn.Module):
         batch_size = images.shape[0]
 
         # generate anchor boxes
-        anchors_all = AnchorBoxUtil.get_anchors_batch(images, self.scales, self.ratios, features, device=self.device)
-        anchors_all = torchvision.ops.clip_boxes_to_image(anchors_all, images.shape[-2:])
+        anchors_all, anchor_within_image_mask = AnchorBoxUtil.get_anchors_batch(images, self.scales, self.ratios, features, device=self.device)
+        # anchors_all = torchvision.ops.clip_boxes_to_image(anchors_all, images.shape[-2:])
+        anchors_all = anchors_all[:, anchor_within_image_mask, :]
         anchors_single = anchors_all[0, :, :]
 
         # evaluate for positive and negative anchors
-        pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets, pos_anchors = AnchorBoxUtil.evaluate_anchor_bboxes_alt(anchors_all, bboxes, labels, pos_thresh=0.7, neg_thresh=0.3, output_batch=256, pos_fraction=0.5, device='cpu')
+        pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets, pos_anchors = AnchorBoxUtil.evaluate_anchor_bboxes_alt(anchors_all, bboxes, labels, pos_thresh=0.7, neg_thresh=0.3, output_batch=256, pos_fraction=0.5)
 
         # evaluate with proposal network
         proposal = self.proposal(features)
         regression = self.regression(proposal) # batch_size x 4*k x feature h x feature w
         regression = regression.permute(0, 2, 3, 1)
         regression = regression.reshape(batch_size, -1, 4)
+        regression = regression[:, anchor_within_image_mask, :]
 
         confidence = self.confidence(proposal) # batch_size x 1*k x feature h x feature w
         confidence = confidence.permute(0, 2, 3, 1)
         confidence = confidence.reshape(batch_size, -1, 1).squeeze()
+        confidence = confidence[:, anchor_within_image_mask]
 
         total_loss = 0
         top_proposals = []
-        top_confidences = []
-        truth_deltas = []
+        # top_confidences = []
 
         for i in range(batch_size):
 
@@ -94,28 +96,27 @@ class FRCRPN(nn.Module):
             bbox_loss = self.l1_loss(pos_offset, pos_regression) / regression.shape[1] * 10
             total_loss = total_loss + class_loss + bbox_loss
 
-            proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
-            nms_mask = torchvision.ops.nms(proposal, confidence_i, self.nms_thresh)
+            proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single).detach()
+            size_mask = AnchorBoxUtil.generate_size_mask(proposal)
+            proposal = proposal[size_mask]
+            confidence_i = confidence_i[size_mask].detach()
+            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, 2000, dim=0)
+            proposal = proposal[top_indices_sorted]
+
+            nms_mask = torchvision.ops.nms(proposal, top_confidence_sorted, self.nms_thresh)
             proposal = proposal[nms_mask]
-            confidence_i = confidence_i[nms_mask]
-            anchors = anchors_single[nms_mask]
-            top_confidence, top_indices = torch.topk(confidence_i.detach(), self.top_n, dim=0)
-            proposal = proposal[top_indices]
-            anchors = anchors[top_indices]
+            proposal = proposal[0:self.top_n]
 
-            top_confidences.append(top_confidence)
-            top_proposals.append(proposal.detach())
-            truth_deltas.append(AnchorBoxUtil.boxes_to_delta(proposal, anchors))
+            top_proposals.append(proposal)
 
-        assigned_labels = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, iou_thresh=0.5)
-
-        return total_loss, top_proposals, assigned_labels, truth_deltas
+        filtered_proposals, assigned_labels, truth_deltas = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, bg_thresh=0.3)
+        return total_loss, filtered_proposals, assigned_labels, truth_deltas
 
     def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):
         batch_size = images.shape[0]
 
         # generate anchor boxes
-        anchors_all = AnchorBoxUtil.get_anchors_batch(images, self.scales, self.ratios, features, device=self.device)
+        anchors_all, _ = AnchorBoxUtil.get_anchors_batch(images, self.scales, self.ratios, features, device=self.device)
         anchors_all = torchvision.ops.clip_boxes_to_image(anchors_all, images.shape[-2:])
         anchors_single = anchors_all[0, :, :]
 

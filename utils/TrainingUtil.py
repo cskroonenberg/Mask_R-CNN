@@ -3,22 +3,25 @@ import datetime
 import matplotlib.pyplot as plt
 import os
 from pathlib import Path
+import sys
 import torch
 import time
 from tqdm import tqdm
 
 
-def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', verbose=True, save=True):
+def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, device='cpu', verbose=True, save=True):
     quiet = not verbose
 
     # training loop
     model.train()
     loss_tracker = []
+    val_loss_tracker = []
     best_epoch, best_loss, best_model = None, None, None
     
-    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True, drop_last=True)
+    dataloader = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, drop_last=True)
+    dataloader_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=True, drop_last=True)
     
-    for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model'):
+    for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model', file=sys.stdout):
 
         if verbose:
             print("-" * 60)
@@ -26,7 +29,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
 
         # evaluate per batch
         loss = 0
-        for data in tqdm(dataloader, disable=quiet):
+        for data in tqdm(dataloader, disable=quiet, file=sys.stdout):
             # Send data to CUDA device
             data_device = []
             for i, item in enumerate(data):
@@ -45,16 +48,34 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
 
             loss += epoch_loss.item()
 
+        # compute validation loss
+        model.eval()
+        val_loss = 0
+        for data in tqdm(dataloader_val, disable=quiet, file=sys.stdout):
+            data_device = []
+            for i, item in enumerate(data):
+                # Segmentation masks are not stored as Tensors because they are all different shapes
+                if isinstance(item, torch.Tensor):
+                    item = item.to(device)
+                data_device.append(item)
+            data = data_device
+            with torch.no_grad():
+                val_loss_epoch = model(*data)
+                val_loss += val_loss_epoch.item()
+        val_loss = val_loss / data_val.n_samples
+        model.train()
+
         # track loss
-        loss /= batch_size
+        loss /= data_train.n_samples
         loss_tracker.append(loss)
+        val_loss_tracker.append(val_loss)
         if verbose:
-            print("  Training Loss: %.2f" % loss)
+            print("  Training Loss: %.2f, Validation Loss %.2f" % (loss, val_loss))
 
         # save the best model TODO: implement validation loss for this criteria
-        if (best_loss is None) or (loss < best_loss):
+        if (best_loss is None) or (val_loss < best_loss):
             best_epoch = i
-            best_loss = loss
+            best_loss = val_loss
             best_model = deepcopy(model.state_dict())
 
     if save:
@@ -73,7 +94,7 @@ def train_model(model, optimizer, data, num_epochs, batch_size, device='cpu', ve
         save_properties(model, optimizer, base_dir)
 
         # save the loss curve
-        save_loss_curve(loss_tracker, base_dir, save_timestamp)
+        save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp)
 
         print("Model, properties, and results saved to: {}".format(base_dir))
     return loss_tracker
@@ -95,13 +116,15 @@ def save_properties(model, optimizer, base_dir):
     props_file.close()
 
 
-def save_loss_curve(loss_tracker, base_dir, save_timestamp):
+def save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp):
     loss_filename = os.path.join(base_dir, "loss_{}.png".format(save_timestamp))
 
     plt.cla()
-    plt.plot(loss_tracker)
+    plt.plot(loss_tracker, label='Training')
+    plt.plot(val_loss_tracker, label='Validation')
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.grid(True)
+    plt.legend()
     plt.savefig(loss_filename)
     plt.cla()

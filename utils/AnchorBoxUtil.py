@@ -237,8 +237,9 @@ def get_anchors(img, features, k_center_anchors):
     image_centers = np.tile(image_centers, reps=k)
     anchors = (image_centers + k_center_anchors.flatten())
     anchors = anchors.reshape(-1, 4)
-    # anchor_within_image_mask = np.all((anchors[:, 0:2] >= [0, 0]) & (anchors[:, 2:4] <= [image_h, image_w]), axis=1)
+    anchor_within_image_mask = np.all((anchors[:, 0:2] >= [0, 0]) & (anchors[:, 2:4] <= [image_h, image_w]), axis=1)
     anchors = torch.tensor(anchors, dtype=torch.float32)
+    anchor_within_image_mask = torch.tensor(anchor_within_image_mask)
 
 
     # image_h, image_w = img.shape[-2:]
@@ -264,7 +265,7 @@ def get_anchors(img, features, k_center_anchors):
     #
     # anchors = image_centers + k_center_anchors
 
-    return anchors #, anchor_within_image_mask
+    return anchors, anchor_within_image_mask
 
 
 def get_anchors_batch(img_all, sizes, aspect_ratios, features_all, device='cpu'):
@@ -279,16 +280,16 @@ def get_anchors_batch(img_all, sizes, aspect_ratios, features_all, device='cpu')
 
     batch_size = img_all.shape[0]
     k_center_anchors = gen_k_center_anchors(sizes, aspect_ratios)
-    anchors = get_anchors(img_all[0, :, :, :], features_all[0, :, :, :], k_center_anchors)
+    anchors, anchor_within_image_mask = get_anchors(img_all[0, :, :, :], features_all[0, :, :, :], k_center_anchors)
     anchors = anchors.unsqueeze(0).repeat(batch_size, 1, 1).to(device)
 
-    return anchors #, anchor_within_image_mask
+    return anchors, anchor_within_image_mask
 
 
-def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_labels, pos_thresh=0.7, neg_thresh=0.3, output_batch=128, pos_fraction=0.5, device='cpu'):
+def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_labels, pos_thresh=0.7, neg_thresh=0.3, output_batch=256, pos_fraction=0.5):
 
-    # num_pos = int(output_batch * pos_fraction)
-    # num_neg = output_batch - num_pos
+    num_pos = int(output_batch * pos_fraction)
+    num_neg = output_batch - num_pos
 
     # evaluate IoUs
     pos_coord_inds, neg_coord_inds, pos_scores, pos_classes, pos_offsets, pos_anchors = [], [], [], [], [], []
@@ -311,35 +312,35 @@ def evaluate_anchor_bboxes_alt(all_anchor_bboxes, all_truth_bboxes, all_truth_la
         pos_mask = torch.logical_or(pos_mask, iou_set > pos_thresh)
         pos_inds_flat = torch.where(pos_mask)[0]
 
-        pos_coord_inds.append(pos_inds_flat)
+        # pos_coord_inds.append(pos_inds_flat)
 
-        # if len(pos_inds_flat) > num_pos:
-        #     # from pos_inds_flat, randomly sample num_pos samples without replacement
-        #     rand_idx_pos = torch.randperm(len(pos_inds_flat))
-        #     pos_inds_flat = pos_inds_flat[rand_idx_pos][0 : num_pos]
-        #     pos_coord_inds.append(pos_inds_flat)
-        # else:
-        #     # take all positive samples
-        #     pos_coord_inds.append(pos_inds_flat)
+        if len(pos_inds_flat) > num_pos:
+            # from pos_inds_flat, randomly sample num_pos samples without replacement
+            rand_idx_pos = torch.randperm(len(pos_inds_flat))
+            pos_inds_flat = pos_inds_flat[rand_idx_pos][0 : num_pos]
+            pos_coord_inds.append(pos_inds_flat)
+        else:
+            # take all positive samples
+            pos_coord_inds.append(pos_inds_flat)
 
         # "negative" consists of any anchor box whose max is below the threshold
         neg_mask = iou_max_per_bbox < neg_thresh
         neg_inds_flat = torch.where(neg_mask)[0]
 
-        rand_idx_neg = torch.randperm(len(neg_inds_flat))
-        neg_inds_flat = neg_inds_flat[rand_idx_neg][0: len(pos_inds_flat)]
-        neg_coord_inds.append(neg_inds_flat)
+        # rand_idx_neg = torch.randperm(len(neg_inds_flat))
+        # neg_inds_flat = neg_inds_flat[rand_idx_neg][0: len(pos_inds_flat)]
+        # neg_coord_inds.append(neg_inds_flat)
 
-        # if len(pos_inds_flat) > num_pos:
-        #     # from neg_inds_flat, randomly sample num_neg samples without replacement
-        #     rand_idx_neg = torch.randperm(len(neg_inds_flat))
-        #     neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : num_neg]
-        #     neg_coord_inds.append(neg_inds_flat)
-        # else:
-        #     # pad with negative samples
-        #     rand_idx_neg = torch.randperm(len(neg_inds_flat))
-        #     neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : (num_neg + num_pos - len(pos_inds_flat))]
-        #     neg_coord_inds.append(neg_inds_flat)
+        if len(pos_inds_flat) > num_pos:
+            # from neg_inds_flat, randomly sample num_neg samples without replacement
+            rand_idx_neg = torch.randperm(len(neg_inds_flat))
+            neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : num_neg]
+            neg_coord_inds.append(neg_inds_flat)
+        else:
+            # pad with negative samples
+            rand_idx_neg = torch.randperm(len(neg_inds_flat))
+            neg_inds_flat = neg_inds_flat[rand_idx_neg][0 : (num_neg + num_pos - len(pos_inds_flat))]
+            neg_coord_inds.append(neg_inds_flat)
 
         # get the IoU scores
         pos_scores.append(iou_max_per_bbox[pos_inds_flat])
@@ -401,15 +402,26 @@ def boxes_to_delta(anchor_coords, pred_coords):
     return torch.stack([tx, ty, tw, th]).transpose(0, 1)
 
 
-def assign_class(proposals, bboxes, labels, iou_thresh=0.5):
+def assign_class(proposals, bboxes, labels, bg_thresh=0.5):
     assigned_labels = []
+    truth_deltas = []
     for idx, (proposal, bbox, label) in enumerate(zip(proposals, bboxes, labels)):
         bbox = bbox[torch.all((bbox != -1), dim=1), :]
         iou_set = torchvision.ops.box_iou(proposal, bbox) # iou matrix, (num proposal boxes) x (gt bboxes)
-        _, best_indices_per_bbox = iou_set.max(dim=1)
-        # bg_mask = torch.all(iou_set < iou_thresh, dim=1)
-        assigned_label = label[best_indices_per_bbox]
-        # assigned_label[bg_mask] = 0
-        assigned_labels.append(assigned_label.detach())
+        iou_max_per_bbox, best_indices_per_bbox = iou_set.max(dim=1, keepdim=True)
 
-    return assigned_labels
+        assigned_label = label[best_indices_per_bbox]
+        assigned_box = bbox[best_indices_per_bbox].squeeze()
+
+        bg_mask = iou_max_per_bbox < bg_thresh
+        assigned_label[bg_mask] = 0
+
+        assigned_labels.append(assigned_label.squeeze().detach())
+        truth_deltas.append(boxes_to_delta(proposal, assigned_box).detach())
+
+    return proposals, assigned_labels, truth_deltas
+
+
+def generate_size_mask(proposal, min_w=5, min_h=5):
+    proposal_cwh = torchvision.ops.box_convert(proposal, in_fmt='xyxy', out_fmt='cxcywh')
+    return torch.logical_and(proposal_cwh[:, 2] > min_w, proposal_cwh[:, 3] > min_h)
