@@ -1,4 +1,92 @@
+import numpy as np
+
 def model_eval(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels):
+    # define iou thresholds
+    iou_thresholds = np.arange(0.5, 0.96, 0.05).tolist()
+
+    # initialize precision recall dictionary to store results
+    precision_recall_dict = {}
+
+    # loop through all iou thresholds to get precision and recall for all classes at each iou_threshold
+    for iou_threshold in iou_thresholds:
+
+        # get tp, fp, fn dictionary for all classes
+        perf_dict = get_perf_dict(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold)
+        
+        # create dictionary to store precision and recall for all classes
+        metric_dict = {key: {'Precision': 0,
+                            'Recall': 0}
+                    for key in str2id.keys()}
+        
+        # derive precision and recall using tp, fp, fn from perf_dict for each class
+        for label in list(metric_dict.keys()):
+            precision, recall = compute_precision_recall(perf_dict[label]['TP'], perf_dict[label]['FP'], perf_dict[label]['FN'])
+            metric_dict[label]['Precision'] = precision
+            metric_dict[label]['Recall'] = recall
+
+        # store precision recall dict for iou_threshold value in results dict
+        precision_recall_dict[iou_threshold] = metric_dict
+
+    # initialize average precision dictionary
+    ap_dict = {key: 0 for key in str2id.keys()}
+
+    # calculate average precision for each label
+    for label in list(str2id.keys()):
+
+        # initialize precisions and recalls list for auc calculation
+        precisions = []
+        recalls = []
+
+        # add precision/recall datapoint for each iou_threshold
+        for iou_threshold in iou_thresholds:
+            precisions.append(precision_recall_dict[iou_threshold][label]['Precision'])
+            recalls.append(precision_recall_dict[iou_threshold][label]['Recall'])
+
+        # need to get unique values of precisions and recalls so that we can sort by recall
+        sorted_precisions = []
+        sorted_recalls = []
+        unique_precisions = []
+        unique_recalls = []
+
+        # find all unique values of recall
+        for a, recall in enumerate(recalls):
+            
+            # add recall to unique_recalls if not in list
+            if recall not in unique_recalls:
+                unique_recalls.append(recall)
+
+                # add corresponding precision for this recall
+                unique_precisions.append(precisions[a])
+
+            # if recall is already in the list and the precision is higher than stored precision, update it
+            elif recall in unique_recalls and precisions[a] > unique_precisions[unique_recalls.index(recall)]:
+                unique_precisions[unique_recalls.index(recall)] = precisions[a]
+        
+        # if there is more than one datapoint
+        if len(unique_recalls) > 1:
+            sorted_indices = np.argsort(unique_recalls)
+            sorted_recalls = np.array(unique_recalls)[sorted_indices]
+            sorted_precisions = np.array(unique_precisions)[sorted_indices]
+        
+        # only one unique datapoint
+        else:
+            sorted_recalls = unique_recalls
+            sorted_precisions = unique_precisions
+        
+        # calculate auc using trapezoidal rule
+        ap = np.trapz(sorted_precisions, sorted_recalls)
+        
+        # store average precision in dictionary
+        ap_dict[label] = ap
+
+        # calculate mAP
+        sum = 0
+        for key in list(ap_dict.keys()):
+            sum += ap_dict[key]
+        mAP = sum / len(list(ap_dict.keys()))
+    return mAP, ap_dict
+
+def get_perf_dict(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold=0.5):
     perf_dict = {key: {'TP': 0,
                    'FP': 0,
                    'FN': 0}
@@ -37,14 +125,14 @@ def model_eval(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, 
                         iou = compute_iou(truth_box, pred_box)
 
                         # if iou is less than threshold, consider it a false positive
-                        if iou < 0.5:
+                        if iou < iou_threshold:
                             perf_dict[pred_labels[k]]['FP'] += 1
 
-                        # iou is >= 0.5 but it's not the best match, also consider it a false positive
-                        elif iou >= 0.5 and iou < best_iou:
+                        # iou is >= iou_threshold but it's not the best match, also consider it a false positive
+                        elif iou >= iou_threshold and iou < best_iou:
                             perf_dict[pred_labels[k]]['FP'] += 1
                         
-                        # iou is >= 0.5 and it's the best match
+                        # iou is >= iou_threshold and it's the best match
                         else:
                             if best_match != -1:
                                 perf_dict[pred_labels[k]]['FP'] += 1
