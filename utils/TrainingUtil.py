@@ -19,6 +19,7 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
     best_epoch, best_loss, best_model = None, None, None
     
     dataloader = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, drop_last=True)
+    dataloader_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=True, drop_last=True)
     
     for i in tqdm(range(1, num_epochs + 1), disable=verbose, desc='Training Model', file=sys.stdout):
 
@@ -49,22 +50,32 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
 
         # compute validation loss
         model.eval()
-        with torch.no_grad():
-            val_loss = model(data_val.images.to(device), data_val.labels.to(device), data_val.bboxes.to(device))
-            val_loss_item = val_loss.item() / data_val.n_samples
+        val_loss = 0
+        for data in tqdm(dataloader_val, disable=quiet, file=sys.stdout):
+            data_device = []
+            for i, item in enumerate(data):
+                # Segmentation masks are not stored as Tensors because they are all different shapes
+                if isinstance(item, torch.Tensor):
+                    item = item.to(device)
+                data_device.append(item)
+            data = data_device
+            with torch.no_grad():
+                val_loss_epoch = model(*data)
+                val_loss += val_loss_epoch.item()
+        val_loss = val_loss / data_val.n_samples
         model.train()
 
         # track loss
         loss /= data_train.n_samples
         loss_tracker.append(loss)
-        val_loss_tracker.append(val_loss_item)
+        val_loss_tracker.append(val_loss)
         if verbose:
-            print("  Training Loss: %.2f, Validation Loss %.2f" % (loss, val_loss_item))
+            print("  Training Loss: %.2f, Validation Loss %.2f" % (loss, val_loss))
 
         # save the best model TODO: implement validation loss for this criteria
-        if (best_loss is None) or (val_loss_item < best_loss):
+        if (best_loss is None) or (val_loss < best_loss):
             best_epoch = i
-            best_loss = val_loss_item
+            best_loss = val_loss
             best_model = deepcopy(model.state_dict())
 
     if save:
