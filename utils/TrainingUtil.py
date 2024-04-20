@@ -29,10 +29,10 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
 
         # evaluate per batch
         loss = 0
-        for data in tqdm(dataloader, disable=quiet, file=sys.stdout):
+        for data in tqdm(dataloader, disable=quiet, desc='Training Model', file=sys.stdout):
             # Send data to CUDA device
             data_device = []
-            for i, item in enumerate(data):
+            for item in data:
                 # Segmentation masks are not stored as Tensors because they are all different shapes
                 if isinstance(item, torch.Tensor):
                     item = item.to(device)
@@ -51,15 +51,15 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
         # compute validation loss
         model.eval()
         val_loss = 0
-        for data in tqdm(dataloader_val, disable=quiet, file=sys.stdout):
-            data_device = []
-            for i, item in enumerate(data):
-                # Segmentation masks are not stored as Tensors because they are all different shapes
-                if isinstance(item, torch.Tensor):
-                    item = item.to(device)
-                data_device.append(item)
-            data = data_device
-            with torch.no_grad():
+        with torch.no_grad():
+            for data in tqdm(dataloader_val, disable=quiet, desc='Running Validation', file=sys.stdout):
+                data_device = []
+                for item in data:
+                    # Segmentation masks are not stored as Tensors because they are all different shapes
+                    if isinstance(item, torch.Tensor):
+                        item = item.to(device)
+                    data_device.append(item)
+                data = data_device
                 val_loss_epoch = model(*data)
                 val_loss += val_loss_epoch.item()
         val_loss = val_loss / data_val.n_samples
@@ -72,7 +72,7 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
         if verbose:
             print("  Training Loss: %.2f, Validation Loss %.2f" % (loss, val_loss))
 
-        # save the best model TODO: implement validation loss for this criteria
+        # save the best model
         if (best_loss is None) or (val_loss < best_loss):
             best_epoch = i
             best_loss = val_loss
