@@ -24,7 +24,7 @@ class FRCRPN(nn.Module):
         self.top_n = top_n
 
         # scales and ratios
-        self.scales = [64, 128, 256]
+        self.scales = [64, 128, 256, 512]
         self.ratios = [0.5, 1.0, 2.0]
 
         # proposal network
@@ -93,23 +93,25 @@ class FRCRPN(nn.Module):
             target = torch.cat((torch.ones_like(pos_confidence), torch.zeros_like(neg_confidence)))
             scores = torch.cat((pos_confidence, neg_confidence))
             class_loss = self.ce_loss(scores, target) / target.shape[0]
-            bbox_loss = self.l1_loss(pos_offset, pos_regression) / regression.shape[1] * 10
+            bbox_loss = self.l1_loss(pos_offset, pos_regression) / target.shape[0]
             total_loss = total_loss + class_loss + bbox_loss
 
-            proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single).detach()
+            proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
             size_mask = AnchorBoxUtil.generate_size_mask(proposal)
             proposal = proposal[size_mask]
-            confidence_i = confidence_i[size_mask].detach()
-            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, 2000, dim=0)
+            confidence_i = confidence_i[size_mask]
+            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, 4000, dim=0)
             proposal = proposal[top_indices_sorted]
 
             nms_mask = torchvision.ops.nms(proposal, top_confidence_sorted, self.nms_thresh)
             proposal = proposal[nms_mask]
             proposal = proposal[0:self.top_n]
 
-            top_proposals.append(proposal)
+            proposal = torchvision.ops.clip_boxes_to_image(proposal, images.shape[-2:])
 
-        filtered_proposals, assigned_labels, truth_deltas = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, bg_thresh=0.3)
+            top_proposals.append(proposal.detach())
+
+        filtered_proposals, assigned_labels, truth_deltas = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, bg_thresh=0.4)
         return total_loss, filtered_proposals, assigned_labels, truth_deltas
 
     def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):

@@ -36,6 +36,21 @@ class FasterRCNN(nn.Module):
             self.backbone = nn.Sequential(*req_layers).eval().to(device)
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
+
+            # Freeze initial layers
+            for param in self.backbone[0].named_parameters():
+                param[1].requires_grad = False
+            for param in self.backbone[1].named_parameters():
+                param[1].requires_grad = False
+            for param in self.backbone[4].named_parameters():
+                param[1].requires_grad = False
+
+            # Freeze batchnorm layers
+            for child in self.backbone.modules():
+                if type(child) == nn.BatchNorm2d:
+                    for param in child.named_parameters():
+                        param[1].requires_grad = False
+
             self.backbone_size = (1024, 30, 40)
             self.feature_to_image_scale = 0.0625
         else:
@@ -62,7 +77,7 @@ class FasterRCNN(nn.Module):
 
         return rpn_loss + class_loss
 
-    def evaluate(self, images, confidence_thresh=0.9, nms_thresh=0.7, device='cpu'):
+    def evaluate(self, images, confidence_thresh=0.5, nms_thresh=0.4, device='cpu'):
         features = self.backbone(images)
 
         proposals_by_batch, scores = self.rpn.evaluate(features, images, confidence_thresh, nms_thresh)

@@ -50,13 +50,14 @@ class FRCClassifier_fasteronly(nn.Module):
 
         # classifier
         self.classifier = nn.Linear(hidden_dim, n_labels + 1).to(device)
+        self.classifier_loss = nn.CrossEntropyLoss(reduction='sum')
 
         # box regression
         self.box_regressor = nn.Linear(hidden_dim, 4 * (n_labels + 1)).to(device)
-        self.box_reg_loss = nn.SmoothL1Loss(reduction='mean')
+        self.box_reg_loss = nn.SmoothL1Loss(reduction='sum')
 
     def forward(self, features, proposals, assigned_labels, truth_deltas):
-
+        N = proposals[0].shape[0]
         # perform ROI pooling
         roi_pool = torchvision.ops.roi_pool(input=features,
                                             boxes=proposals,
@@ -72,7 +73,7 @@ class FRCClassifier_fasteronly(nn.Module):
         fg_mask = (assigned_labels != 0)
 
         # calculate cross entropy loss
-        class_loss = nn.functional.cross_entropy(class_scores, assigned_labels)
+        class_loss = self.classifier_loss(class_scores, assigned_labels) / N
 
         # box regression scores
         box_reg_scores = self.box_regressor(out)
@@ -89,7 +90,7 @@ class FRCClassifier_fasteronly(nn.Module):
         truth_deltas_fg = truth_deltas[fg_mask, :]
 
         # calculate box regression loss
-        box_reg_loss = self.box_reg_loss(box_reg_scores_fg[truth_delta_masks_fg], truth_deltas_fg.flatten())
+        box_reg_loss = self.box_reg_loss(box_reg_scores_fg[truth_delta_masks_fg], truth_deltas_fg.flatten()) / N
 
         return class_loss + box_reg_loss
 
