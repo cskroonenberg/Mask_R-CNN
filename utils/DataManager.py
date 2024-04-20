@@ -21,19 +21,20 @@ def load_data(dataset_name, num_train, num_val, img_size, load_masks=False):
     :type num_train: int | None
     :type num_val: int | None
     :type img_size: tuple
+    :type load_masks: bool
     :return: train_data, val_data, str2id, id2str
     """
 
     # load in the raw datasets from zoo
     dataset_train = foz.load_zoo_dataset(
         dataset_name,
-        splits=["train"],
+        split="train",
         max_samples=num_train,
         label_types=["segmentations"]
     )
     dataset_val = foz.load_zoo_dataset(
         dataset_name,
-        splits=["validation"],
+        split="validation",
         max_samples=num_val,
         label_types=["segmentations"]
     )
