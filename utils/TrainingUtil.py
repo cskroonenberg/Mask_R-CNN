@@ -93,10 +93,10 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
                 # compute validation mAP
                 proposals, labels = model.evaluate(data[0], device=device)
 
-            batch_truth_boxes += [entry.tolist() for entry in data[2]]
-            batch_truth_labels += [entry.tolist() for entry in data[1]]
-            batch_eval_boxes += [entry.tolist() for entry in proposals]
-            batch_eval_labels += [entry.tolist() for entry in labels]
+                batch_truth_boxes += [entry.tolist() for entry in data[2]]
+                batch_truth_labels += [entry.tolist() for entry in data[1]]
+                batch_eval_boxes += [entry.tolist() for entry in proposals]
+                batch_eval_labels += [entry.tolist() for entry in labels]
         val_mAP, ap_dict = EvalUtil.model_eval(id2str,
                                                batch_truth_boxes,
                                                batch_truth_labels,
