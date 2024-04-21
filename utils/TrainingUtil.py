@@ -7,9 +7,10 @@ import sys
 import torch
 import time
 from tqdm import tqdm
+from utils import EvalUtil
 
 
-def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, device='cpu', verbose=True, save=True):
+def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, str2id, id2str, device='cpu', verbose=True, save=True):
     quiet = not verbose
 
     # training loop
@@ -51,6 +52,10 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
         # compute validation loss
         model.eval()
         val_loss = 0
+        batch_truth_boxes = []
+        batch_truth_labels = []
+        batch_eval_boxes = []
+        batch_eval_labels = []
         for data in tqdm(dataloader_val, disable=quiet, file=sys.stdout):
             data_device = []
             for i, item in enumerate(data):
@@ -62,7 +67,22 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
             with torch.no_grad():
                 val_loss_epoch = model(*data)
                 val_loss += val_loss_epoch.item()
+
+                # compute validation mAP
+                proposals, labels = model.evaluate(data[0], device=device)
+
+            batch_truth_boxes += [entry.tolist() for entry in data[2]]
+            batch_truth_labels += [entry.tolist() for entry in data[1]]
+            batch_eval_boxes += [entry.tolist() for entry in proposals]
+            batch_eval_labels += [entry.tolist() for entry in labels]
+        val_mAP, ap_dict = EvalUtil.model_eval(id2str,
+                                               batch_truth_boxes,
+                                               batch_truth_labels,
+                                               batch_eval_boxes,
+                                               batch_eval_labels)
+        print(ap_dict)
         val_loss = val_loss / data_val.n_samples
+
         model.train()
 
         # track loss
@@ -70,7 +90,7 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
         loss_tracker.append(loss)
         val_loss_tracker.append(val_loss)
         if verbose:
-            print("  Training Loss: %.2f, Validation Loss %.2f" % (loss, val_loss))
+            print("  Training Loss: %.2f, Validation Loss %.2f, Validation mAP %.4f" % (loss, val_loss, val_mAP*100))
 
         # save the best model TODO: implement validation loss for this criteria
         if (best_loss is None) or (val_loss < best_loss):

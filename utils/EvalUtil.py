@@ -1,6 +1,6 @@
 import numpy as np
 
-def model_eval(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels):
+def model_eval(id2str, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels):
     # define iou thresholds
     iou_thresholds = np.arange(0.5, 0.96, 0.05).tolist()
 
@@ -11,12 +11,12 @@ def model_eval(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, 
     for iou_threshold in iou_thresholds:
 
         # get tp, fp, fn dictionary for all classes
-        perf_dict = get_perf_dict(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold)
+        perf_dict = get_perf_dict(id2str, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold)
         
         # create dictionary to store precision and recall for all classes
         metric_dict = {key: {'Precision': 0,
                             'Recall': 0}
-                    for key in str2id.keys()}
+                    for key in id2str.keys()}
         
         # derive precision and recall using tp, fp, fn from perf_dict for each class
         for label in list(metric_dict.keys()):
@@ -28,10 +28,10 @@ def model_eval(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, 
         precision_recall_dict[iou_threshold] = metric_dict
 
     # initialize average precision dictionary
-    ap_dict = {key: 0 for key in str2id.keys()}
+    ap_dict = {key: 0 for key in id2str.keys()}
 
     # calculate average precision for each label
-    for label in list(str2id.keys()):
+    for label in list(id2str.keys()):
 
         # initialize precisions and recalls list for auc calculation
         precisions = []
