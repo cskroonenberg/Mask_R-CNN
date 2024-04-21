@@ -158,7 +158,6 @@ class FRCRPN(nn.Module):
             scores.append(confidence_score[nms_mask])
             proposals_i = proposals_i[nms_mask]
 
-            proposals_i = torchvision.ops.clip_boxes_to_image(proposals_i, images.shape[-2:])
             proposals.append(proposals_i)
 
         return proposals, scores

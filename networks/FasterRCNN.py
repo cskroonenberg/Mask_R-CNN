@@ -85,7 +85,7 @@ class FasterRCNN(nn.Module):
 
         return rpn_loss + class_loss
 
-    def evaluate(self, images, confidence_thresh=0.5, nms_thresh=0.4, device='cpu'):
+    def evaluate(self, images, confidence_thresh=0.8, nms_thresh=0.4, device='cpu'):
         features = self.backbone(images)
 
         proposals_by_batch, scores = self.rpn.evaluate(features, images, confidence_thresh, nms_thresh)
@@ -118,6 +118,12 @@ class FasterRCNN(nn.Module):
                 truth_deltas[i, :] = deltas[i, (4 * gt):(4 * gt + 4)]
 
             final_proposal = AnchorBoxUtil.delta_to_boxes(truth_deltas, proposals)
+            final_proposal = torchvision.ops.clip_boxes_to_image(final_proposal, images.shape[-2:])
+
+            size_mask = AnchorBoxUtil.generate_size_mask(final_proposal, min_w=5, min_h=5)
+            final_proposal = final_proposal[size_mask]
+            label = label[size_mask]
+            score = score[size_mask]
 
             nms_mask = torchvision.ops.nms(final_proposal, score, nms_thresh)
 
