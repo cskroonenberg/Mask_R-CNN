@@ -21,6 +21,8 @@ class FRCDataset(Dataset):
         self.images = None
         self.labels = None
         self.bboxes = None
+        self.file_paths = None
+        self.img_size = img_size
         self.parse_dataset(dataset, img_size, str2id)
 
     def parse_dataset(self, datasets, img_size, str2id):
@@ -33,7 +35,7 @@ class FRCDataset(Dataset):
         if not isinstance(datasets, list):
             datasets = [datasets]
 
-        images, labels, bboxes = [], [], []
+        images, labels, bboxes, file_paths = [], [], [], []
         for i, dataset in enumerate(datasets):
             for image_id, file_path in enumerate(tqdm(dataset.values("filepath"), desc="Pre-processing [{}] Dataset ({}/{})".format(self.dataset_type, i + 1, len(datasets)), file=sys.stdout)):
                 # load the image data and convert it to a tensor
@@ -57,20 +59,24 @@ class FRCDataset(Dataset):
 
                 # perform transformations for re-sizing
                 transformed = transform(image=img_data[0, :].cpu().numpy(), bboxes=np.array(bboxes_i))
-                img_data = pil_to_tensor(pil_img.resize(img_size[::-1])).type(torch.float32).cpu()
+                # img_data = pil_to_tensor(pil_img.resize(img_size[::-1])).type(torch.float32).cpu()
 
-                images.append(img_data)
+                # images.append(img_data)
                 labels.append(torch.tensor(labels_i))
                 bboxes.append(torch.tensor(transformed['bboxes'])[:, :-1])
+            file_paths += dataset.values("filepath").copy()
 
         # store the dataset information
         self.n_samples = len(labels)
-        self.images = torch.stack(images).cpu()
+        # self.images = torch.stack(images).cpu()
         self.labels = pad_sequence(labels, batch_first=True, padding_value=-1)
         self.bboxes = pad_sequence(bboxes, batch_first=True, padding_value=-1)
+        self.file_paths = file_paths
     
     def __len__(self):
         return self.n_samples
     
     def __getitem__(self, index):
-        return self.images[index].clone(), self.labels[index].clone(), self.bboxes[index].clone()
+        pil_img = Image.open(self.file_paths[index]).convert("RGB")
+        img_data = pil_to_tensor(pil_img.resize(self.img_size[::-1])).type(torch.float32).cpu()
+        return img_data, self.labels[index].clone(), self.bboxes[index].clone()
