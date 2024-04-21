@@ -13,7 +13,7 @@ from tqdm import tqdm
 from utils import EvalUtil
 
 
-def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, str2id, id2str, device='cpu', verbose=True, save=True):
+def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, batch_size, id2str, device='cpu', verbose=True, save=True):
     quiet = not verbose
 
     can_debug = isinstance(model, FasterRCNN)
@@ -106,6 +106,8 @@ def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, 
         val_loss = val_loss / data_val.n_samples
 
         model.train()
+
+        scheduler.step()
 
         # track loss
         loss /= data_train.n_samples

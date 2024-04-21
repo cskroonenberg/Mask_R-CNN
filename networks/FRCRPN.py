@@ -104,17 +104,23 @@ class FRCRPN(nn.Module):
             losses['rpn_box'] += bbox_loss.item()
 
             proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
+
+            prenms_topn = 6000
+            if confidence_i.shape[0] < prenms_topn:
+                prenms_topn = confidence_i.shape[0]
+
+            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, prenms_topn, dim=0)
+            proposal = proposal[top_indices_sorted]
+
+            proposal = torchvision.ops.clip_boxes_to_image(proposal, images.shape[-2:])
+
             size_mask = AnchorBoxUtil.generate_size_mask(proposal)
             proposal = proposal[size_mask]
-            confidence_i = confidence_i[size_mask]
-            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, 4000, dim=0)
-            proposal = proposal[top_indices_sorted]
+            top_confidence_sorted = top_confidence_sorted[size_mask]
 
             nms_mask = torchvision.ops.nms(proposal, top_confidence_sorted, self.nms_thresh)
             proposal = proposal[nms_mask]
             proposal = proposal[0:self.top_n]
-
-            proposal = torchvision.ops.clip_boxes_to_image(proposal, images.shape[-2:])
 
             top_proposals.append(proposal.detach())
 
