@@ -56,7 +56,7 @@ class FRCClassifier_fasteronly(nn.Module):
         self.box_regressor = nn.Linear(hidden_dim, 4 * (n_labels + 1)).to(device)
         self.box_reg_loss = nn.SmoothL1Loss(reduction='sum')
 
-    def forward(self, features, proposals, assigned_labels, truth_deltas):
+    def forward(self, features, proposals, assigned_labels, truth_deltas, debug=False):
         N = proposals[0].shape[0]
         # perform ROI pooling
         roi_pool = torchvision.ops.roi_pool(input=features,
@@ -91,6 +91,14 @@ class FRCClassifier_fasteronly(nn.Module):
 
         # calculate box regression loss
         box_reg_loss = self.box_reg_loss(box_reg_scores_fg[truth_delta_masks_fg], truth_deltas_fg.flatten()) / N
+
+        # debug loss breakdown
+        if debug:
+            losses = {
+                'cls_class': class_loss.item(),
+                'cls_box': box_reg_loss.item()
+            }
+            return class_loss + box_reg_loss, losses
 
         return class_loss + box_reg_loss
 

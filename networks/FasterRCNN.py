@@ -60,9 +60,15 @@ class FasterRCNN(nn.Module):
         self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, device=device).to(device)
         self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, self.feature_to_image_scale, hidden_dim, dropout, device=device).to(device)
 
-    def forward(self, images, truth_labels, truth_bboxes):
+    def forward(self, images, truth_labels, truth_bboxes, debug=False):
         # with torch.no_grad():
         features = self.backbone(images)
+
+        if debug:
+            rpn_loss, proposals, assigned_labels, truth_deltas, rpn_losses = self.rpn(features, images, truth_labels, truth_bboxes, debug)
+            class_loss, class_losses = self.classifier(features, proposals, assigned_labels, truth_deltas, debug)
+            losses = {'rpn_class': rpn_losses['rpn_class'], 'rpn_box': rpn_losses['rpn_box'], 'cls_class': class_losses['cls_class'], 'cls_box': class_losses['cls_box']}
+            return rpn_loss + class_loss, losses
 
         # evaluate region proposal network
         rpn_loss, proposals, assigned_labels, truth_deltas = self.rpn(features, images, truth_labels, truth_bboxes)

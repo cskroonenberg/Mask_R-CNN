@@ -44,7 +44,7 @@ class FRCRPN(nn.Module):
         self.h_scale = self.h_inp / self.h_out
         self.w_scale = self.w_inp / self.w_out
 
-    def forward(self, features, images, labels, bboxes):
+    def forward(self, features, images, labels, bboxes, debug=False):
         # bboxes = the ground truth boxes, batch_size x num_boxes x 4, tensors are padded with -1 when there are not enough bboxes
 
         batch_size = images.shape[0]
@@ -73,6 +73,7 @@ class FRCRPN(nn.Module):
         total_loss = 0
         top_proposals = []
         # top_confidences = []
+        losses = {'rpn_class': 0, 'rpn_box': 0}
 
         for i in range(batch_size):
 
@@ -95,6 +96,8 @@ class FRCRPN(nn.Module):
             class_loss = self.ce_loss(scores, target) / target.shape[0]
             bbox_loss = self.l1_loss(pos_offset, pos_regression) / target.shape[0]
             total_loss = total_loss + class_loss + bbox_loss
+            losses['rpn_class'] += class_loss.item()
+            losses['rpn_box'] += bbox_loss.item()
 
             proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
             size_mask = AnchorBoxUtil.generate_size_mask(proposal)
@@ -112,6 +115,8 @@ class FRCRPN(nn.Module):
             top_proposals.append(proposal.detach())
 
         filtered_proposals, assigned_labels, truth_deltas = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, bg_thresh=0.4)
+        if debug:
+            return total_loss, filtered_proposals, assigned_labels, truth_deltas, losses
         return total_loss, filtered_proposals, assigned_labels, truth_deltas
 
     def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):
