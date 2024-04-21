@@ -8,7 +8,7 @@ from utils import AnchorBoxUtil
 
 
 class FRCRPN(nn.Module):
-    def __init__(self, img_size, pos_thresh, neg_thresh, nms_thresh, top_n, backbone_size, hidden_dim=512, dropout=0.1, device='cpu'):
+    def __init__(self, img_size, pos_thresh, neg_thresh, nms_thresh, top_n, backbone_size, hidden_dim=512, dropout=0.1, anc_scales=None, anc_ratios=None, device='cpu'):
         super().__init__()
 
         self.device = device
@@ -24,8 +24,12 @@ class FRCRPN(nn.Module):
         self.top_n = top_n
 
         # scales and ratios
-        self.scales = [64, 128, 256, 512]
-        self.ratios = [0.5, 1.0, 2.0]
+        if anc_scales is None:
+            anc_scales = [64, 128, 256, 512]
+        if anc_ratios is None:
+            anc_ratios = [0.5, 1.0, 2.0]
+        self.scales = anc_scales
+        self.ratios = anc_ratios
 
         # proposal network
         self.c_out, self.h_out, self.w_out = backbone_size # feature channels, feature h, feature w

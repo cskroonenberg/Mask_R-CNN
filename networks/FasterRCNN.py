@@ -12,7 +12,7 @@ from utils import AnchorBoxUtil
 class FasterRCNN(nn.Module):
     def __init__(self, img_size, roi_size, n_labels, top_n,
                  pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, hidden_dim=512, dropout=0.1, backbone='resnet50',
-                 device='cpu'):
+                 anc_scales=None, anc_ratios=None, device='cpu'):
         super().__init__()
 
         self.hyper_params = {
@@ -24,7 +24,9 @@ class FasterRCNN(nn.Module):
             'nms_thresh': nms_thresh,
             'hidden_dim': hidden_dim,
             'dropout': dropout,
-            'backbone': backbone
+            'backbone': backbone,
+            'anc_scales': anc_scales,
+            'anc_ratios': anc_ratios
         }
 
         self.device = device
@@ -57,7 +59,7 @@ class FasterRCNN(nn.Module):
             raise NotImplementedError
 
         # initialize the RPN and classifier
-        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, device=device).to(device)
+        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, anc_scales, anc_ratios, device=device).to(device)
         self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, self.feature_to_image_scale, hidden_dim, dropout, device=device).to(device)
 
     def forward(self, images, truth_labels, truth_bboxes, debug=False):

@@ -2,7 +2,9 @@ from copy import deepcopy
 import datetime
 import matplotlib.pyplot as plt
 from networks.FasterRCNN import FasterRCNN
+import numpy as np
 import os
+import pandas as pd
 from pathlib import Path
 import sys
 import torch
@@ -146,8 +148,7 @@ def save_properties(model, optimizer, base_dir):
 
 
 def save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp):
-    loss_filename = os.path.join(base_dir, "loss_{}.png".format(save_timestamp))
-
+    loss_curve_filename = os.path.join(base_dir, "loss_{}.png".format(save_timestamp))
     plt.cla()
     plt.plot(loss_tracker, label='Training')
     plt.plot(val_loss_tracker, label='Validation')
@@ -155,21 +156,35 @@ def save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp):
     plt.ylabel("Loss")
     plt.grid(True)
     plt.legend()
-    plt.savefig(loss_filename)
+    plt.savefig(loss_curve_filename)
     plt.cla()
+
+    loss_filename = os.path.join(base_dir, "loss_{}_values.csv".format(save_timestamp))
+    dataset = np.array([np.arange(1, len(loss_tracker) + 1).tolist(), loss_tracker, val_loss_tracker]).transpose().tolist()
+    dataframe = pd.DataFrame(dataset, columns=['epoch', 'train_loss', 'val_loss'])
+    dataframe.to_csv(loss_filename, index=False)
 
 
 def save_losses_curve(train_losses_tracker, val_losses_tracker, base_dir, save_timestamp):
-    loss_filename = os.path.join(base_dir, "losses_{}.png".format(save_timestamp))
-
+    loss_curve_filename = os.path.join(base_dir, "losses_{}.png".format(save_timestamp))
     plt.cla()
+    data, cols = [], ['epoch']
     for loss_type in train_losses_tracker.keys():
         plt.plot(train_losses_tracker[loss_type], label="Train {}".format(loss_type))
+        data.append(train_losses_tracker[loss_type])
+        cols.append("train_{}_loss".format(loss_type))
     for loss_type in val_losses_tracker.keys():
         plt.plot(val_losses_tracker[loss_type], label="Val {}".format(loss_type))
+        data.append(val_losses_tracker[loss_type])
+        cols.append("val_{}_loss".format(loss_type))
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.grid(True)
     plt.legend()
-    plt.savefig(loss_filename)
+    plt.savefig(loss_curve_filename)
     plt.cla()
+
+    loss_filename = os.path.join(base_dir, "losses_{}_values.csv".format(save_timestamp))
+    dataset = np.array([np.arange(1, len(train_losses_tracker['rpn_class']) + 1).tolist()] + data).transpose().tolist()
+    dataframe = pd.DataFrame(dataset, columns=cols)
+    dataframe.to_csv(loss_filename, index=False)
