@@ -52,6 +52,54 @@ def load_data(dataset_name, num_train, num_val, img_size, load_masks=False):
     return train_data, val_data, str2id, id2str
 
 
+def load_supplemented_data(dataset_name, num_train, num_val, img_size, load_masks=False):
+    """
+    :type dataset_name: str
+    :type num_train: int | None
+    :type num_val: int | None
+    :type img_size: tuple
+    :type load_masks: bool
+    :return: train_data, val_data, str2id, id2str
+    """
+
+    fo.config.default_ml_backend = "tensorflow"
+
+    # load in the raw datasets from zoo
+    dataset_train = foz.load_zoo_dataset(
+        dataset_name,
+        split="train",
+        max_samples=num_train,
+        label_types=["segmentations"]
+    )
+    if num_train is None:
+        num_train = len(dataset_train.values("filepath"))
+    dataset_test = foz.load_zoo_dataset(
+        dataset_name,
+        split="test",
+        max_samples=num_train,
+        label_types=["segmentations"]
+    )
+    print("Supplementing {} training images with {} additional images from 'test' split".format(num_train, num_val, dataset_name))
+    dataset_val = foz.load_zoo_dataset(
+        dataset_name,
+        split="validation",
+        max_samples=num_val,
+        label_types=["segmentations"]
+    )
+
+    # load in the id-to-string mapping and vice-versa
+    id2str = load_id2str_mapping(dataset_name)
+    id2str[-1] = "pad"
+    str2id = {id2str[int_id]: int_id for int_id in id2str.keys()}
+
+    dataset = MRCDataset if load_masks else FRCDataset
+
+    # parse the datasets
+    train_data = dataset([dataset_train, dataset_test], img_size, str2id, 'Train')
+    val_data = dataset(dataset_val, img_size, str2id, 'Validation')
+    return train_data, val_data, str2id, id2str
+
+
 def load_id2str_mapping(dataset_name):
     filename = os.path.join("config", dataset_name, "id2str_mapping.txt")
     id2str = {}
