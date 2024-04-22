@@ -86,60 +86,88 @@ def model_eval(id2str, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, 
         mAP = sum / len(list(ap_dict.keys()))
     return mAP, ap_dict
 
-def get_perf_dict(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold=0.5):
-    perf_dict = {key: {'TP': 0,
-                   'FP': 0,
-                   'FN': 0}
-                   for key in str2id.keys()}
+# def get_perf_dict(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold=0.5):
+#     perf_dict = {key: {'TP': 0,
+#                    'FP': 0,
+#                    'FN': 0}
+#                    for key in str2id.keys()}
     
-    # Iterate through each evaluated image
-    for j, truth_labels in enumerate(batch_truth_labels):
+#     # Iterate through each evaluated image
+#     for j, truth_labels in enumerate(batch_truth_labels):
 
-        truth_boxes = batch_truth_boxes[j]
-        pred_boxes = batch_pred_boxes[j]
-        pred_labels = batch_pred_labels[j]
+#         truth_boxes = batch_truth_boxes[j]
+#         pred_boxes = batch_pred_boxes[j]
+#         pred_labels = batch_pred_labels[j]
 
-        # calculate false negatives
-        for truth in truth_labels:
-            if truth not in pred_labels and truth != 'pad':
-                perf_dict[truth]['FN'] += 1
+#         # calculate false negatives
+#         for truth in truth_labels:
+#             if truth not in pred_labels and truth != 'pad':
+#                 perf_dict[truth]['FN'] += 1
 
-        for i, truth_box in enumerate(truth_boxes):
+#         for i, truth_box in enumerate(truth_boxes):
 
-            # initialize tracker for best match for ground truth box
-            best_match = -1
-            best_iou = 0
+#             # initialize tracker for best match for ground truth box
+#             best_match = -1
+#             best_iou = 0
 
-            for k, pred_box in enumerate(pred_boxes):
+#             for k, pred_box in enumerate(pred_boxes):
                 
-                # if a predicted box does not match any ground truth box, consider it a false positive
-                if pred_labels[k] not in truth_labels:
-                    perf_dict[pred_labels[k]]['FP'] += 1
+#                 # if a predicted box does not match any ground truth box, consider it a false positive
+#                 if pred_labels[k] not in truth_labels:
+#                     perf_dict[pred_labels[k]]['FP'] += 1
                 
-                # there is a match between the predicted box and a ground truth box
-                else:
-                    # only consider cases when the labels for the boxes match
-                    if pred_labels[k] == truth_labels[i]:
+#                 # there is a match between the predicted box and a ground truth box
+#                 else:
+#                     # only consider cases when the labels for the boxes match
+#                     if pred_labels[k] == truth_labels[i]:
 
-                        # compute iou
-                        iou = compute_iou(truth_box, pred_box)
+#                         # compute iou
+#                         iou = compute_iou(truth_box, pred_box)
 
-                        # if iou is less than threshold, consider it a false positive
-                        if iou < iou_threshold:
-                            perf_dict[pred_labels[k]]['FP'] += 1
+#                         # if iou is less than threshold, consider it a false positive
+#                         if iou < iou_threshold:
+#                             perf_dict[pred_labels[k]]['FP'] += 1
 
-                        # iou is >= iou_threshold but it's not the best match, also consider it a false positive
-                        elif iou >= iou_threshold and iou < best_iou:
-                            perf_dict[pred_labels[k]]['FP'] += 1
+#                         # iou is >= iou_threshold but it's not the best match, also consider it a false positive
+#                         elif iou >= iou_threshold and iou < best_iou:
+#                             perf_dict[pred_labels[k]]['FP'] += 1
                         
-                        # iou is >= iou_threshold and it's the best match
-                        else:
-                            if best_match != -1:
-                                perf_dict[pred_labels[k]]['FP'] += 1
-                            else:
-                                best_iou = iou
-                                best_match = k
-                                perf_dict[pred_labels[k]]['TP'] += 1
+#                         # iou is >= iou_threshold and it's the best match
+#                         else:
+#                             if best_match != -1:
+#                                 perf_dict[pred_labels[k]]['FP'] += 1
+#                             else:
+#                                 best_iou = iou
+#                                 best_match = k
+#                                 perf_dict[pred_labels[k]]['TP'] += 1
+#     return perf_dict
+
+def get_perf_dict(id2str, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold=0.5):
+    perf_dict = {key: {'TP': 0, 'FP': 0, 'FN': 0} for key in id2str.keys()}
+    
+    # Iterate through each batch of images
+    for truth_boxes, truth_labels, pred_boxes, pred_labels in zip(batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels):
+        matched = set()
+        
+        # Iterate over all predictions
+        for k, pred_box in enumerate(pred_boxes):
+            found_match = False
+            for i, truth_box in enumerate(truth_boxes):
+                if pred_labels[k] == truth_labels[i]:  # Ensure labels match
+                    iou = compute_iou(pred_box, truth_box)
+                    if iou >= iou_threshold and (i not in matched):  # Check IoU threshold and unmatched
+                        perf_dict[pred_labels[k]]['TP'] += 1
+                        matched.add(i)
+                        found_match = True
+                        break
+            if not found_match:
+                perf_dict[pred_labels[k]]['FP'] += 1
+
+        # Calculate FNs
+        for i, truth_label in enumerate(truth_labels):
+            if i not in matched:
+                perf_dict[truth_label]['FN'] += 1
+
     return perf_dict
 
 def compute_iou(boxA, boxB):
