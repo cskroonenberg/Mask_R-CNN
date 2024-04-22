@@ -102,7 +102,6 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
                                                batch_truth_labels,
                                                batch_eval_boxes,
                                                batch_eval_labels)
-        print(ap_dict)
         val_loss = val_loss / data_val.n_samples
 
         model.train()
@@ -114,6 +113,7 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
         loss_tracker.append(loss)
         val_loss_tracker.append(val_loss)
         if verbose:
+            print(ap_dict)
             print("  Training Loss: %.2f, Validation Loss %.2f, Validation mAP %.4f" % (loss, val_loss, val_mAP*100))
 
         # save the best model
