@@ -115,10 +115,29 @@ class FRCClassifier_fasteronly(nn.Module):
 
         # classification scores
         scores = self.classifier(out)
+        scores = nn.functional.softmax(scores, dim=1)
 
         box_deltas = self.box_regressor(out)
 
         return scores, box_deltas
+
+    # def evaluate(self, features, proposals):
+    #
+    #     # perform ROI pooling
+    #     roi_pool = torchvision.ops.roi_pool(input=features,
+    #                                         boxes=proposals,
+    #                                         output_size=self.roi_size,
+    #                                         spatial_scale=self.feature_to_image_scale)
+    #
+    #     # apply hidden layers
+    #     out = self.hidden(roi_pool)
+    #
+    #     # classification scores
+    #     scores = self.classifier(out)
+    #
+    #     box_deltas = self.box_regressor(out)
+    #
+    #     return scores, box_deltas
 
     @staticmethod
     def box_regression_loss(box_reg_scores, truth_deltas, truth_delta_masks, scale=1.0, sigma=1.0):

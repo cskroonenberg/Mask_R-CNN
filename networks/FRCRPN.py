@@ -98,7 +98,8 @@ class FRCRPN(nn.Module):
             target = torch.cat((torch.ones_like(pos_confidence), torch.zeros_like(neg_confidence)))
             scores = torch.cat((pos_confidence, neg_confidence))
             class_loss = self.ce_loss(scores, target) / target.shape[0]
-            bbox_loss = self.l1_loss(pos_offset, pos_regression) / target.shape[0]
+            # bbox_loss = self.l1_loss(pos_offset, pos_regression) / target.shape[0]
+            bbox_loss = self.l1_loss(pos_regression, pos_offset) / target.shape[0]
             total_loss = total_loss + class_loss + bbox_loss
             losses['rpn_class'] += class_loss.item()
             losses['rpn_box'] += bbox_loss.item()
@@ -129,12 +130,12 @@ class FRCRPN(nn.Module):
             return total_loss, filtered_proposals, assigned_labels, truth_deltas, losses
         return total_loss, filtered_proposals, assigned_labels, truth_deltas
 
-    def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):
+    def evaluate(self, features, images, top_n):
+
         batch_size = images.shape[0]
 
         # generate anchor boxes
         anchors_all, _ = AnchorBoxUtil.get_anchors_batch(images, self.scales, self.ratios, features, device=self.device)
-        anchors_all = torchvision.ops.clip_boxes_to_image(anchors_all, images.shape[-2:])
         anchors_single = anchors_all[0, :, :]
 
         # evaluate with proposal network
@@ -147,20 +148,69 @@ class FRCRPN(nn.Module):
         confidence = confidence.permute(0, 2, 3, 1)
         confidence = confidence.reshape(batch_size, -1, 1).squeeze()
 
-        proposals, scores = [], []
-        for confidence_i, regression_i, batch_anchor_bboxes in zip(confidence, regression, anchors_all):
-            confidence_score = torch.sigmoid(confidence_i)
-            proposals_i = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
-            confidence_mask = confidence_score > confidence_thresh
-            proposals_i = proposals_i[confidence_mask]
-            confidence_score = confidence_score[confidence_mask]
-            nms_mask = torchvision.ops.nms(proposals_i, confidence_score, nms_thresh)
-            scores.append(confidence_score[nms_mask])
-            proposals_i = proposals_i[nms_mask]
+        top_proposals = []
 
-            proposals.append(proposals_i)
+        for i in range(batch_size):
 
-        return proposals, scores
+            regression_i = regression[i, :, :]
+            confidence_i = confidence[i, :]
+
+            proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
+
+            prenms_topn = 12000
+            if confidence_i.shape[0] < prenms_topn:
+                prenms_topn = confidence_i.shape[0]
+
+            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, prenms_topn, dim=0)
+            proposal = proposal[top_indices_sorted]
+
+            proposal = torchvision.ops.clip_boxes_to_image(proposal, images.shape[-2:])
+
+            size_mask = AnchorBoxUtil.generate_size_mask(proposal)
+            proposal = proposal[size_mask]
+            top_confidence_sorted = top_confidence_sorted[size_mask]
+
+            nms_mask = torchvision.ops.nms(proposal, top_confidence_sorted, 0.7)
+
+            proposal = proposal[nms_mask]
+            proposal = proposal[0:top_n]
+
+            top_proposals.append(proposal)
+
+        return top_proposals
+
+    # def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):
+    #     batch_size = images.shape[0]
+    #
+    #     # generate anchor boxes
+    #     anchors_all, _ = AnchorBoxUtil.get_anchors_batch(images, self.scales, self.ratios, features, device=self.device)
+    #     anchors_all = torchvision.ops.clip_boxes_to_image(anchors_all, images.shape[-2:])
+    #     anchors_single = anchors_all[0, :, :]
+    #
+    #     # evaluate with proposal network
+    #     proposal = self.proposal(features)
+    #     regression = self.regression(proposal)  # batch_size x 4*k x feature h x feature w
+    #     regression = regression.permute(0, 2, 3, 1)
+    #     regression = regression.reshape(batch_size, -1, 4)
+    #
+    #     confidence = self.confidence(proposal)  # batch_size x 1*k x feature h x feature w
+    #     confidence = confidence.permute(0, 2, 3, 1)
+    #     confidence = confidence.reshape(batch_size, -1, 1).squeeze()
+    #
+    #     proposals, scores = [], []
+    #     for confidence_i, regression_i, batch_anchor_bboxes in zip(confidence, regression, anchors_all):
+    #         confidence_score = torch.sigmoid(confidence_i)
+    #         proposals_i = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
+    #         confidence_mask = confidence_score > confidence_thresh
+    #         proposals_i = proposals_i[confidence_mask]
+    #         confidence_score = confidence_score[confidence_mask]
+    #         nms_mask = torchvision.ops.nms(proposals_i, confidence_score, nms_thresh)
+    #         scores.append(confidence_score[nms_mask])
+    #         proposals_i = proposals_i[nms_mask]
+    #
+    #         proposals.append(proposals_i)
+    #
+    #     return proposals, scores
 
     @staticmethod
     def generate_proposals(pos_points, pos_regression):
