@@ -79,11 +79,12 @@ def model_eval(id2str, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, 
         # store average precision in dictionary
         ap_dict[label] = ap
 
-        # calculate mAP
-        sum = 0
-        for key in list(ap_dict.keys()):
-            sum += ap_dict[key]
-        mAP = sum / len(list(ap_dict.keys()))
+    # calculate mAP
+    ap_dict.pop(-1)
+    sum = 0
+    for key in list(ap_dict.keys()):
+        sum += ap_dict[key]
+    mAP = sum / len(list(ap_dict.keys()))
     return mAP, ap_dict
 
 # def get_perf_dict(str2id, batch_truth_boxes, batch_truth_labels, batch_pred_boxes, batch_pred_labels, iou_threshold=0.5):
