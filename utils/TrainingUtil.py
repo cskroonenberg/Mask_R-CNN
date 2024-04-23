@@ -24,7 +24,7 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
     val_loss_tracker = []
     mAP_avg_tracker = []
     mAP_per_tracker = []
-    best_epoch, best_loss, best_model = None, None, None
+    best_epoch, best_mAP, best_model = None, None, None
     train_losses_tracker = {'rpn_class': [], 'rpn_box': [], 'cls_class': [], 'cls_box': []}
     val_losses_tracker = {'rpn_class': [], 'rpn_box': [], 'cls_class': [], 'cls_box': []}
     dataloader = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, drop_last=True)
@@ -121,9 +121,9 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
             print("  Training Loss: %.2f, Validation Loss %.2f, Validation mAP %.4f" % (loss, val_loss, val_mAP*100))
 
         # save the best model
-        if (best_loss is None) or (val_loss < best_loss):
+        if (best_mAP is None) or (val_mAP > best_mAP):
             best_epoch = i
-            best_loss = val_loss
+            best_mAP = val_mAP
             best_model = deepcopy(model.state_dict())
 
         # loss breakdown
