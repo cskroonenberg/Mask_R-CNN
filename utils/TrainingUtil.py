@@ -22,6 +22,8 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
     model.train()
     loss_tracker = []
     val_loss_tracker = []
+    mAP_avg_tracker = []
+    mAP_per_tracker = []
     best_epoch, best_loss, best_model = None, None, None
     train_losses_tracker = {'rpn_class': [], 'rpn_box': [], 'cls_class': [], 'cls_box': []}
     val_losses_tracker = {'rpn_class': [], 'rpn_box': [], 'cls_class': [], 'cls_box': []}
@@ -112,6 +114,8 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
         loss /= data_train.n_samples
         loss_tracker.append(loss)
         val_loss_tracker.append(val_loss)
+        mAP_avg_tracker.append(val_mAP * 100)
+        mAP_per_tracker.append(ap_dict)
         if verbose:
             print(ap_dict)
             print("  Training Loss: %.2f, Validation Loss %.2f, Validation mAP %.4f" % (loss, val_loss, val_mAP*100))
@@ -127,7 +131,6 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
             for loss_type in train_losses_tracker.keys():
                 train_losses_tracker[loss_type].append(train_losses[loss_type] / data_train.n_samples)
                 val_losses_tracker[loss_type].append(val_losses[loss_type] / data_val.n_samples)
-
 
     if save:
         # make a save directory
@@ -146,6 +149,9 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
 
         # save the loss curve
         save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp)
+
+        # save mAP information
+        save_mAP(mAP_avg_tracker, mAP_per_tracker, base_dir, save_timestamp)
 
         # save loss breakdown
         if can_debug:
@@ -173,7 +179,7 @@ def save_properties(model, optimizer, base_dir):
 
 def save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp):
     loss_curve_filename = os.path.join(base_dir, "loss_{}.png".format(save_timestamp))
-    epochs = np.arange(1, len(loss_tracker) + 1).tolist()
+    epochs = np.arange(1, len(loss_tracker) + 1, dtype=int).tolist()
     plt.cla()
     plt.plot(epochs, loss_tracker, label='Training')
     plt.plot(epochs, val_loss_tracker, label='Validation')
@@ -190,9 +196,32 @@ def save_loss_curve(loss_tracker, val_loss_tracker, base_dir, save_timestamp):
     dataframe.to_csv(loss_filename, index=False)
 
 
+def save_mAP(mAP_avg_tracker, mAP_per_tracker, base_dir, save_timestamp):
+    epochs = np.arange(1, len(mAP_avg_tracker) + 1, dtype=int).tolist()
+
+    mAP_curve_filename = os.path.join(base_dir, "mAP_{}.png".format(save_timestamp))
+    plt.cla()
+    plt.plot(epochs, mAP_avg_tracker)
+    plt.xlabel("Epoch")
+    plt.ylabel("Validation mAP")
+    plt.grid(True)
+    plt.savefig(mAP_curve_filename)
+    plt.cla()
+
+    mAP_filename = os.path.join(base_dir, "mAP_{}_values.csv".format(save_timestamp))
+    mAP_list = [epochs, mAP_avg_tracker]
+    mAP_cols = ['epoch', 'avg']
+    for key in mAP_per_tracker[0].keys():
+        mAP_list.append([mAP_per_tracker[i][key] for i in range(len(mAP_per_tracker))])
+        mAP_cols.append(key)
+    dataset = np.array(mAP_list).transpose().tolist()
+    dataframe = pd.DataFrame(dataset, columns=mAP_cols)
+    dataframe.to_csv(mAP_filename, index=False)
+
+
 def save_losses_curve(train_losses_tracker, val_losses_tracker, base_dir, save_timestamp):
     loss_curve_filename = os.path.join(base_dir, "losses_{}.png".format(save_timestamp))
-    epochs = np.arange(1, len(train_losses_tracker['rpn_class']) + 1).tolist()
+    epochs = np.arange(1, len(train_losses_tracker['rpn_class']) + 1, dtype=int).tolist()
     plt.cla()
     data, cols = [], ['epoch']
     for loss_type in train_losses_tracker.keys():
