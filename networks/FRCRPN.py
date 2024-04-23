@@ -8,7 +8,7 @@ from utils import AnchorBoxUtil
 
 
 class FRCRPN(nn.Module):
-    def __init__(self, img_size, pos_thresh, neg_thresh, nms_thresh, top_n, backbone_size, hidden_dim=512, dropout=0.1, device='cpu'):
+    def __init__(self, img_size, pos_thresh, neg_thresh, nms_thresh, top_n, backbone_size, hidden_dim=512, dropout=0.1, anc_scales=None, anc_ratios=None, device='cpu'):
         super().__init__()
 
         self.device = device
@@ -24,8 +24,12 @@ class FRCRPN(nn.Module):
         self.top_n = top_n
 
         # scales and ratios
-        self.scales = [64, 128, 256]
-        self.ratios = [0.5, 1.0, 2.0]
+        if anc_scales is None:
+            anc_scales = [64, 128, 256, 512]
+        if anc_ratios is None:
+            anc_ratios = [0.5, 1.0, 2.0]
+        self.scales = anc_scales
+        self.ratios = anc_ratios
 
         # proposal network
         self.c_out, self.h_out, self.w_out = backbone_size # feature channels, feature h, feature w
@@ -44,7 +48,7 @@ class FRCRPN(nn.Module):
         self.h_scale = self.h_inp / self.h_out
         self.w_scale = self.w_inp / self.w_out
 
-    def forward(self, features, images, labels, bboxes):
+    def forward(self, features, images, labels, bboxes, debug=False):
         # bboxes = the ground truth boxes, batch_size x num_boxes x 4, tensors are padded with -1 when there are not enough bboxes
 
         batch_size = images.shape[0]
@@ -73,6 +77,7 @@ class FRCRPN(nn.Module):
         total_loss = 0
         top_proposals = []
         # top_confidences = []
+        losses = {'rpn_class': 0, 'rpn_box': 0}
 
         for i in range(batch_size):
 
@@ -93,23 +98,35 @@ class FRCRPN(nn.Module):
             target = torch.cat((torch.ones_like(pos_confidence), torch.zeros_like(neg_confidence)))
             scores = torch.cat((pos_confidence, neg_confidence))
             class_loss = self.ce_loss(scores, target) / target.shape[0]
-            bbox_loss = self.l1_loss(pos_offset, pos_regression) / regression.shape[1] * 10
+            bbox_loss = self.l1_loss(pos_offset, pos_regression) / target.shape[0]
             total_loss = total_loss + class_loss + bbox_loss
+            losses['rpn_class'] += class_loss.item()
+            losses['rpn_box'] += bbox_loss.item()
 
-            proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single).detach()
+            proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
+
+            prenms_topn = 6000
+            if confidence_i.shape[0] < prenms_topn:
+                prenms_topn = confidence_i.shape[0]
+
+            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, prenms_topn, dim=0)
+            proposal = proposal[top_indices_sorted]
+
+            proposal = torchvision.ops.clip_boxes_to_image(proposal, images.shape[-2:])
+
             size_mask = AnchorBoxUtil.generate_size_mask(proposal)
             proposal = proposal[size_mask]
-            confidence_i = confidence_i[size_mask].detach()
-            top_confidence_sorted, top_indices_sorted = torch.topk(confidence_i, 2000, dim=0)
-            proposal = proposal[top_indices_sorted]
+            top_confidence_sorted = top_confidence_sorted[size_mask]
 
             nms_mask = torchvision.ops.nms(proposal, top_confidence_sorted, self.nms_thresh)
             proposal = proposal[nms_mask]
             proposal = proposal[0:self.top_n]
 
-            top_proposals.append(proposal)
+            top_proposals.append(proposal.detach())
 
-        filtered_proposals, assigned_labels, truth_deltas = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, bg_thresh=0.3)
+        filtered_proposals, assigned_labels, truth_deltas = AnchorBoxUtil.assign_class(top_proposals, bboxes, labels, bg_thresh=0.4)
+        if debug:
+            return total_loss, filtered_proposals, assigned_labels, truth_deltas, losses
         return total_loss, filtered_proposals, assigned_labels, truth_deltas
 
     def evaluate(self, features, images, confidence_thresh=0.5, nms_thresh=0.7):
@@ -141,7 +158,6 @@ class FRCRPN(nn.Module):
             scores.append(confidence_score[nms_mask])
             proposals_i = proposals_i[nms_mask]
 
-            proposals_i = torchvision.ops.clip_boxes_to_image(proposals_i, images.shape[-2:])
             proposals.append(proposals_i)
 
         return proposals, scores

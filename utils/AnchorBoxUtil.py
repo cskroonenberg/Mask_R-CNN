@@ -387,7 +387,7 @@ def delta_to_boxes(rpn_delta, anchors):
     pred_box = torch.cat((pred_box_x, pred_box_y, pred_box_w, pred_box_h), dim=1)
     pred_box = torchvision.ops.box_convert(pred_box, in_fmt='cxcywh', out_fmt='xyxy')
 
-    return pred_box.round()
+    return pred_box
 
 
 def boxes_to_delta(anchor_coords, pred_coords):
@@ -422,6 +422,6 @@ def assign_class(proposals, bboxes, labels, bg_thresh=0.5):
     return proposals, assigned_labels, truth_deltas
 
 
-def generate_size_mask(proposal, min_w=5, min_h=5):
+def generate_size_mask(proposal, min_w=8, min_h=8):
     proposal_cwh = torchvision.ops.box_convert(proposal, in_fmt='xyxy', out_fmt='cxcywh')
     return torch.logical_and(proposal_cwh[:, 2] > min_w, proposal_cwh[:, 3] > min_h)

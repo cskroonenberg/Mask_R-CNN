@@ -12,7 +12,7 @@ from utils import AnchorBoxUtil
 class FasterRCNN(nn.Module):
     def __init__(self, img_size, roi_size, n_labels, top_n,
                  pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, hidden_dim=512, dropout=0.1, backbone='resnet50',
-                 device='cpu'):
+                 anc_scales=None, anc_ratios=None, device='cpu'):
         super().__init__()
 
         self.hyper_params = {
@@ -24,7 +24,9 @@ class FasterRCNN(nn.Module):
             'nms_thresh': nms_thresh,
             'hidden_dim': hidden_dim,
             'dropout': dropout,
-            'backbone': backbone
+            'backbone': backbone,
+            'anc_scales': anc_scales,
+            'anc_ratios': anc_ratios
         }
 
         self.device = device
@@ -36,18 +38,39 @@ class FasterRCNN(nn.Module):
             self.backbone = nn.Sequential(*req_layers).eval().to(device)
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
+
+            # Freeze initial layers
+            for param in self.backbone[0].named_parameters():
+                param[1].requires_grad = False
+            for param in self.backbone[1].named_parameters():
+                param[1].requires_grad = False
+            for param in self.backbone[4].named_parameters():
+                param[1].requires_grad = False
+
+            # Freeze batchnorm layers
+            for child in self.backbone.modules():
+                if type(child) == nn.BatchNorm2d:
+                    for param in child.named_parameters():
+                        param[1].requires_grad = False
+
             self.backbone_size = (1024, 30, 40)
             self.feature_to_image_scale = 0.0625
         else:
             raise NotImplementedError
 
         # initialize the RPN and classifier
-        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, device=device).to(device)
+        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, anc_scales, anc_ratios, device=device).to(device)
         self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, self.feature_to_image_scale, hidden_dim, dropout, device=device).to(device)
 
-    def forward(self, images, truth_labels, truth_bboxes):
+    def forward(self, images, truth_labels, truth_bboxes, debug=False):
         # with torch.no_grad():
         features = self.backbone(images)
+
+        if debug:
+            rpn_loss, proposals, assigned_labels, truth_deltas, rpn_losses = self.rpn(features, images, truth_labels, truth_bboxes, debug)
+            class_loss, class_losses = self.classifier(features, proposals, assigned_labels, truth_deltas, debug)
+            losses = {'rpn_class': rpn_losses['rpn_class'], 'rpn_box': rpn_losses['rpn_box'], 'cls_class': class_losses['cls_class'], 'cls_box': class_losses['cls_box']}
+            return rpn_loss + class_loss, losses
 
         # evaluate region proposal network
         rpn_loss, proposals, assigned_labels, truth_deltas = self.rpn(features, images, truth_labels, truth_bboxes)
@@ -62,7 +85,7 @@ class FasterRCNN(nn.Module):
 
         return rpn_loss + class_loss
 
-    def evaluate(self, images, confidence_thresh=0.9, nms_thresh=0.7, device='cpu'):
+    def evaluate(self, images, confidence_thresh=0.8, nms_thresh=0.4, device='cpu'):
         features = self.backbone(images)
 
         proposals_by_batch, scores = self.rpn.evaluate(features, images, confidence_thresh, nms_thresh)
@@ -95,6 +118,12 @@ class FasterRCNN(nn.Module):
                 truth_deltas[i, :] = deltas[i, (4 * gt):(4 * gt + 4)]
 
             final_proposal = AnchorBoxUtil.delta_to_boxes(truth_deltas, proposals)
+            final_proposal = torchvision.ops.clip_boxes_to_image(final_proposal, images.shape[-2:])
+
+            size_mask = AnchorBoxUtil.generate_size_mask(final_proposal, min_w=5, min_h=5)
+            final_proposal = final_proposal[size_mask]
+            label = label[size_mask]
+            score = score[size_mask]
 
             nms_mask = torchvision.ops.nms(final_proposal, score, nms_thresh)
 
