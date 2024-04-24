@@ -1,6 +1,7 @@
 from networks.FRCRPN import FRCRPN
 from networks.FCN import MaskHead
-from networks.FRCClassifier import FRCClassifier
+from networks.FRCClassifier import FRCClassifier, FRCClassifier_fasteronly
+from utils import AnchorBoxUtil
 
 import torch
 import torch.nn as nn
@@ -9,12 +10,14 @@ from torchvision.models import ResNet50_Weights
 
 class MaskRCNN(nn.Module):
     def __init__(self, img_size, roi_size, n_labels, top_n,
-                 pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, hidden_dim=512, dropout=0.1, backbone='resnet50', device='cpu'):
+                 pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, mask_size=[14, 14],
+                 hidden_dim=512, dropout=0.1, backbone='resnet50', device='cpu'):
         super().__init__()
 
         self.hyper_params = {
             'img_size': img_size,
             'roi_size': roi_size,
+            'mask_size': mask_size,
             'n_labels': n_labels,
             'pos_thresh': pos_thresh,
             'neg_thresh': neg_thresh,
@@ -39,55 +42,34 @@ class MaskRCNN(nn.Module):
 
         # initialize the RPN and classifier
         self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, device=device).to(device)
-        self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout, device=device).to(device)
-        self.mask_head = MaskHead(2048, num_classes=n_labels).to(device)
+        # self.classifier = FRCClassifier(roi_size, self.backbone_size, n_labels, hidden_dim, dropout, device=device).to(device)
+        self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, self.feature_to_image_scale, hidden_dim, dropout, device=device).to(device)
+        self.mask_head = MaskHead(2048, num_classes=n_labels, device=device).to(device)
         self.mask_loss_fn = nn.BCELoss().to(device)
 
     def unpack_mask_truth(self, truth_masks):
         valid_masks = []
+        # print("num valid masks: ", end='')
         for i in range(truth_masks.shape[0]):  # Iterate over images
             num_valid_masks = 0
             for j in range(truth_masks.shape[1]):  # Iterate over masks
                 if torch.all(truth_masks[i, j] == -1):
                     break
-                # print(f"truth_masks[{i}, {j}].shape: {truth_masks[i, j].shape}")
-                # print(f"torch.where(truth_masks[i, j, 0] == -1): {torch.where(truth_masks[i, j, 0] == -1)}")
-                # print(f"torch.where(truth_masks[i, j, 0] == -1)[0].shape: {torch.where(truth_masks[i, j, 0] == -1)[0].shape}")
-                # print(f"truth_masks[{i}, {j}, 0]: {truth_masks[i, j, 0]}")
+
                 last_row = torch.where(truth_masks[i, j, 0] == -1)[0][0] if len(torch.where(truth_masks[i, j, 0] == -1)[0]) > 0 else truth_masks.shape[2]
                 last_col = torch.where(truth_masks[i, j, :, 0] == -1)[0][0] if len(torch.where(truth_masks[i, j, :, 0] == -1)[0]) > 0 else truth_masks.shape[3]
-                
-                # print(f"torch.unique(truth_masks[i,j]): {torch.unique(truth_masks[i,j])}")
-                # import cv2
-                # import numpy as np
-                # img = truth_masks[i,j].numpy() + 1
-                # cv2.imwrite("full_mask.jpg", (img*127).astype(np.uint8))
-                # img = truth_masks[i,j, :last_col, :last_row].numpy() + 1
-                # cv2.imwrite("mask.jpg", (img*127).astype(np.uint8))
-                # print(f"torch.unique(truth_masks[i,j, :last_col, :last_row]): {torch.unique(truth_masks[i,j, :last_col, :last_row])}")
-                
-                # print(f"truth_masks[i,j, :last_col, :last_row].shape: {truth_masks[i,j, :last_col, :last_row].shape}")
-                
-                # Sum the values of the mask to count the number of -1 entries
-                # num_minus_ones = torch.sum((truth_masks[i,j] == -1)).item()
-                # print("Number of -1 entries:", num_minus_ones)
 
-                # num_minus_ones = torch.sum((truth_masks[i,j, :last_col, :last_row] == -1)).item()
-                # print("Number of -1 entries (post-mask):", num_minus_ones)
-                
-                # num_minus_ones = torch.sum((truth_masks[i,j, :last_col+1, :last_row+1] == -1)).item()
-                # print("Number of -1 entries (post-irony):", num_minus_ones)
-                # img_masks.append(truth_masks[i, j, :last_col, :last_row])
-                # print(f"truth_masks[i, j, :last_col, :last_row].shape: {truth_masks[i, j, :last_col, :last_row].shape}")
-                # print(f"truth_masks[i, j, :last_col, :last_row].unsqueeze(0).unsqueeze(0).shape: {truth_masks[i, j, :last_col, :last_row].unsqueeze(0).unsqueeze(0).shape}")
-                valid_masks.append(torch.nn.functional.interpolate(truth_masks[i, j, :last_col, :last_row].unsqueeze(0).unsqueeze(0), size=self.hyper_params['roi_size']).squeeze())
-                # quit()
+                valid_masks.append(torch.nn.functional.interpolate(truth_masks[i, j, :last_col, :last_row].unsqueeze(0).unsqueeze(0).type('torch.FloatTensor'), size=self.hyper_params['mask_size']).squeeze())
                 num_valid_masks += 1
-            # valid_masks.append(img_masks)
+            
+            # print(num_valid_masks, end=" ")
+        # print()
+        # print(f"valid_masks[0].shape: {valid_masks[0].shape}")
+        # print(f"len(valid_masks): {len(valid_masks)}")
             
         return torch.stack(valid_masks)
 
-    def unpack_bbox_truth(self, truth_bboxes):
+    def unpack_bbox_truth(self, truth_bboxes, device='cpu'):
         valid_bboxes = []
         for i, bboxes in enumerate(truth_bboxes):
             img_bboxes = []
@@ -95,9 +77,9 @@ class MaskRCNN(nn.Module):
                 if torch.all(bboxes[j] == -1):
                     break
                 img_bboxes.append(bboxes[j])
-            # print(f"img {i} - {len(img_bboxes)} gt bboxes")
-            valid_bboxes.append(torch.stack(img_bboxes).type('torch.FloatTensor'))
+            valid_bboxes.append(torch.stack(img_bboxes).type('torch.FloatTensor').to(device))
                 
+        # return torch.stack(valid_bboxes).int()
         return valid_bboxes
 
     def unpack_label_truth(self, truth_labels):
@@ -110,42 +92,51 @@ class MaskRCNN(nn.Module):
         return torch.stack(valid_labels).int()
 
     def forward(self, images, truth_labels, truth_bboxes, truth_masks):
+        images = images.to(self.device)
+        truth_labels = truth_labels.to(self.device)
+        truth_bboxes = truth_bboxes.to(self.device)
+        truth_masks = truth_masks.to(self.device)
+        
         features = self.backbone(images)
         
         # evaluate region proposal network
-        rpn_loss, proposals, assigned_labels, _ = self.rpn(features, images, truth_labels, truth_bboxes)
+        rpn_loss, proposals, assigned_labels, truth_deltas = self.rpn(features, images, truth_labels, truth_bboxes)
 
+        true_label_count = truth_labels.ne(-1).sum(dim=1)
+        # print(f"true label count: {true_label_count}")
+        # print(f"total true label count: {torch.sum(true_label_count)}")
 
-        # perform ROI align for Mask R-CNN
-        proposed_rois = torchvision.ops.roi_align(input=features,
-                                         boxes=proposals,
-                                         output_size=self.hyper_params["roi_size"],
-                                         spatial_scale=self.feature_to_image_scale)
-        
-        gt_bboxes = self.unpack_bbox_truth(truth_bboxes)
+        gt_bboxes = self.unpack_bbox_truth(truth_bboxes, device=self.device)
         
         gt_rois = torchvision.ops.roi_align(input=features,
-                                         boxes=gt_bboxes,
-                                         output_size=self.hyper_params["roi_size"],
-                                         spatial_scale=self.feature_to_image_scale)
+                                            boxes=gt_bboxes,
+                                            output_size=self.hyper_params["mask_size"],
+                                            spatial_scale=self.feature_to_image_scale)
         
-        # run classifier
-        proposed_class_scores = self.classifier(proposed_rois)
-        assigned_labels = torch.cat(assigned_labels, dim=0)
-
-        # calculate cross entropy loss
-        class_loss = nn.functional.cross_entropy(proposed_class_scores, assigned_labels)
+        class_loss = self.classifier(features, proposals, assigned_labels, truth_deltas)
 
         # TODO: Use proposed masks for inference
         # proposed_masks = self.mask_head(proposed_rois)
         gt_pred_masks = self.mask_head(gt_rois)
         
-        gt_masks = self.unpack_mask_truth(truth_masks)
+        gt_masks = self.unpack_mask_truth(truth_masks).to(self.device)
         
-        valid_labels = self.unpack_label_truth(truth_labels)
-        gt_pred_masks = gt_pred_masks[torch.arange(gt_pred_masks.size(0)), valid_labels]
+        gt_labels = self.unpack_label_truth(truth_labels)
+        # print(f"gt_pred_masks.shape: {gt_pred_masks.shape}")
+        # print(f"torch.arange(gt_pred_masks.size(0)).shape: {torch.arange(gt_pred_masks.size(0)).shape}")
+        
+        gt_pred_masks = gt_pred_masks[torch.arange(gt_pred_masks.size(0)), gt_labels]
+        
+        # print(f"gt_labels.shape: {gt_labels.shape}")
+        # print("*" * 70)
+        # print(f"gt_pred_masks.shape: {gt_pred_masks.shape}")
+        # print(f"gt_masks.shape: {gt_masks.shape}")
         
         mask_loss = self.mask_loss_fn(gt_pred_masks, gt_masks)
+
+        # print(f"type(rpn_loss): {type(rpn_loss)}")
+        # print(f"type(class_loss): {type(class_loss)}")
+        # print(f"type(mask_loss): {type(mask_loss)}")
 
         total_loss = rpn_loss + class_loss + mask_loss
 
@@ -154,28 +145,51 @@ class MaskRCNN(nn.Module):
 
         return total_loss
 
-
-    def evaluate(self, images, confidence_thresh=0.5, nms_thresh=0.7):
+    def evaluate(self, images, top_n=128, confidence_thresh=0.5, nms_thresh_final=0.7, device='cpu'):
         features = self.backbone(images)
-        
-        proposals_by_batch, scores = self.rpn.evaluate(features, images)
-        
-        # perform ROI align for Mask R-CNN
-        rois = torchvision.ops.roi_align(input=features,
-                                         boxes=proposals_by_batch,
-                                         output_size=self.hyper_params["roi_size"])
-        
-        class_scores = self.classifier(rois)
 
-        # evaluate using softmax
-        p = nn.functional.softmax(class_scores, dim=-1)
-        preds = p.argmax(dim=-1)
+        proposals_by_batch = self.rpn.evaluate(features, images, top_n)
+        class_scores, box_deltas = self.classifier.evaluate(features, proposals_by_batch)
 
-        labels = []
-        i = 0
-        for proposals in proposals_by_batch:
-            n = len(proposals)
-            labels.append(preds[i: i + n])
-            i += n
+        batch_proposals = []
+        batch_labels = []
+        for idx, proposals_i in enumerate(proposals_by_batch):
+            class_proposals_dict = {}
+            scores_i = class_scores[idx * top_n:(idx + 1) * top_n, :]
+            deltas_i = box_deltas[idx * top_n:(idx + 1) * top_n, :]
 
-        return proposals_by_batch, scores, labels
+            for class_idx in range(1, scores_i.shape[1]):  # skip background
+                scores_i_class = scores_i[:, class_idx]
+                deltas_i_class = deltas_i[:, class_idx * 4:(class_idx + 1) * 4]
+                select_mask = torch.where(scores_i_class > confidence_thresh)[0]
+                if select_mask.numel() == 0:
+                    continue
+                proposals_i_class_select = proposals_i[select_mask]
+                deltas_i_class_select = deltas_i_class[select_mask]
+                scores_i_class_select = scores_i_class[select_mask]
+                proposals_i_class_select = AnchorBoxUtil.delta_to_boxes(deltas_i_class_select, proposals_i_class_select)
+                proposals_i_class_select = torchvision.ops.clip_boxes_to_image(proposals_i_class_select,
+                                                                               images.shape[-2:])
+
+                nms_mask = torchvision.ops.nms(proposals_i_class_select, scores_i_class_select, nms_thresh_final)
+
+                class_proposals_dict[class_idx] = proposals_i_class_select[nms_mask]
+
+            filtered_proposals = []
+            filtered_labels = []
+
+            for cls in class_proposals_dict.keys():
+                prop = class_proposals_dict[cls]
+                filtered_labels = filtered_labels + [cls] * prop.shape[0]
+                filtered_proposals.append(prop)
+
+            if len(filtered_proposals) == 0:
+                filtered_proposals = torch.tensor(filtered_proposals)
+            else:
+                filtered_proposals = torch.cat(filtered_proposals)
+            filtered_labels = torch.tensor(filtered_labels)
+
+            batch_proposals.append(filtered_proposals)
+            batch_labels.append(filtered_labels)
+
+        return batch_proposals, batch_labels
