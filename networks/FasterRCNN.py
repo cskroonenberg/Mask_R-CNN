@@ -34,7 +34,7 @@ class FasterRCNN(nn.Module):
         if backbone == 'resnet50':
             # resnet backbone
             model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)
-            req_layers = list(model.children())[:7]
+            req_layers = list(model.children())[:8]
             self.backbone = nn.Sequential(*req_layers).eval().to(device)
             for param in self.backbone.named_parameters():
                 param[1].requires_grad = True
@@ -53,8 +53,8 @@ class FasterRCNN(nn.Module):
                     for param in child.named_parameters():
                         param[1].requires_grad = False
 
-            self.backbone_size = (1024, 30, 40)
-            self.feature_to_image_scale = 0.0625
+            self.backbone_size = (2048, 15, 20)
+            self.feature_to_image_scale = 0.03125
         else:
             raise NotImplementedError
 
