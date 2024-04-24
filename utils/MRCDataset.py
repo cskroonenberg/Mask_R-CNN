@@ -60,6 +60,8 @@ class MRCDataset(Dataset):
 
             # parse detections
             labels_i, bboxes_i, masks_i = [], [], []
+            if sample["ground_truth"] is None:
+                continue
             for i, detection in enumerate(sample["ground_truth"].detections):
                 x_min, y_min, w, h = detection.bounding_box
                 x_min, w = x_min * w_img, w * w_img
