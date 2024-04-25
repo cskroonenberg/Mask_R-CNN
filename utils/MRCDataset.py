@@ -1,7 +1,6 @@
 import albumentations
 import numpy as np
 from PIL import Image
-import random
 import torch
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
@@ -23,9 +22,13 @@ class MRCDataset(Dataset):
 
         self.dataset_type = dataset_type
         self.n_samples = None
-        self.images = None
         self.labels = None
         self.bboxes = None
+        self.paths = []
+        self.img_size = img_size
+        self.max_mask_dim1 = 0
+        self.max_mask_dim2 = 0
+        self.max_masks = 0
         self.parse_dataset(dataset, img_size, str2id)
 
     def paint_mask(self, image, bbox, mask):
@@ -44,15 +47,12 @@ class MRCDataset(Dataset):
         transform = albumentations.Compose([albumentations.Resize(height=h_out, width=w_out, always_apply=True)],
                                            bbox_params=albumentations.BboxParams(format='pascal_voc'))
 
-        max_mask_dim1 = 0
-        max_mask_dim2 = 0
-        max_masks = 0
-
-        images, labels, bboxes, masks = [], [], [], []
+        labels, bboxes, masks = [], [], []
         for image_id, file_path in enumerate(tqdm(dataset.values("filepath"), desc="Pre-processing [{}] Dataset".format(self.dataset_type))):
             # load the image data and convert it to a tensor
+            self.paths.append(file_path)
             pil_img = Image.open(file_path).convert("RGB")
-            img_data = pil_to_tensor(pil_img).type(torch.float32)
+            img_data = pil_to_tensor(pil_img)
             _, h_img, w_img = img_data.shape
 
             # load the sample
@@ -73,16 +73,14 @@ class MRCDataset(Dataset):
 
                 masks_i.append(torch.tensor(detection.mask).type('torch.CharTensor'))
                 
-                max_mask_dim1 = max(detection.mask.shape[0], max_mask_dim1) 
-                max_mask_dim2 = max(detection.mask.shape[1], max_mask_dim2) 
+                self.max_mask_dim1 = max(detection.mask.shape[0], self.max_mask_dim1) 
+                self.max_mask_dim2 = max(detection.mask.shape[1], self.max_mask_dim2) 
             
-            max_masks = max(len(masks_i), max_masks) 
+            self.max_masks = max(len(masks_i), self.max_masks) 
                 
             # perform transformations for re-sizing
             transformed = transform(image=img_data[0, :].cpu().numpy(), bboxes=np.array(bboxes_i))
-            img_data = pil_to_tensor(pil_img.resize(img_size[::-1])).type(torch.float32).cpu()
 
-            images.append(img_data)
             labels.append(torch.tensor(labels_i))
             tboxes = torch.tensor(transformed['bboxes'])[:, :-1]
             bboxes.append(tboxes)
@@ -90,27 +88,29 @@ class MRCDataset(Dataset):
 
         # store the dataset information
         self.n_samples = len(labels)
-        self.images = torch.stack(images).cpu()
         self.labels = pad_sequence(labels, batch_first=True, padding_value=-1)
         self.bboxes = pad_sequence(bboxes, batch_first=True, padding_value=-1)
-        self.masks = self.pad_masks(masks, max_mask_dim1, max_mask_dim2, max_masks)
-
+        self.masks = masks
+        
     def __len__(self):
         return self.n_samples
     
     def __getitem__(self, index):
-        return self.images[index], self.labels[index], self.bboxes[index], self.masks[index]
+        pil_img = Image.open(self.paths[index]).convert("RGB")
+        img = pil_to_tensor(pil_img.resize(self.img_size[::-1])).type(torch.float32)
+        return img, self.labels[index], self.bboxes[index], self.pad_masks(self.masks[index])
     
-    def pad_masks(self, img_masks, max_dim1, max_dim2, max_masks):
-        padded = []
-        for masks in img_masks:
-            padded_masks = [
-                F.pad(mask, (0, max_dim2 - mask.shape[1], 0, max_dim1 - mask.shape[0]), mode='constant', value=-1)
-                for mask in masks
-            ]
-            for i in range(max_masks - len(masks)):
-                padded_masks.append(torch.full((max_dim1, max_dim2), -1))
-                
-            padded.append(torch.stack(padded_masks).to(torch.float32))
+    def pad_masks(self, masks):
+        # padded = []
+        # for masks in img_masks:
+        padded_masks = [
+            F.pad(mask, (0, self.max_mask_dim2 - mask.shape[1], 0, self.max_mask_dim1 - mask.shape[0]), mode='constant', value=-1)
+            for mask in masks
+        ]
+        for i in range(self.max_masks - len(masks)):
+            padded_masks.append(torch.full((self.max_mask_dim1, self.max_mask_dim2), -1))
             
-        return torch.stack(padded).to(torch.float32)
+        # padded.append(torch.stack(padded_masks).to(torch.float32))
+            
+        # return torch.stack(padded).to(torch.float32)
+        return torch.stack(padded_masks).to(torch.float32)
