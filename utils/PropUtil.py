@@ -8,7 +8,6 @@ def load_properties(file_path):
     with open(file_path, 'rb') as props_reader:
         raw_props.load(props_reader)
 
-    print("hey")
     props = {
         'model.img_size': parse_int_tuple(raw_props['model.img_size'][0]),
         'model.roi_size': parse_int_tuple(raw_props['model.roi_size'][0]),
