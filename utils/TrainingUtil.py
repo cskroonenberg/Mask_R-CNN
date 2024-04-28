@@ -210,7 +210,7 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
         save_mAP(mAP_avg_tracker, mAP_per_tracker, base_dir, save_timestamp)
 
         # save loss breakdown
-        save_losses_curve(train_losses_tracker, val_losses_tracker, loss_dir, save_timestamp, num_epochs)
+        save_losses_curve(train_losses_tracker, val_losses_tracker, base_dir, save_timestamp, num_epochs)
 
         print("Model, properties, and results saved to: {}".format(base_dir))
     return loss_tracker
