@@ -2,6 +2,7 @@ import numpy as np
 from matplotlib import patches
 import matplotlib.pyplot as plt
 from torchvision import ops
+import torch
 
 
 def build_image(image, bboxes, labels, box_color='y', show=False, filename=None):
@@ -72,3 +73,41 @@ def build_grid_images(images, bboxes, labels, box_color='y', show=False, filenam
 
     if filename is not None:
         fig.savefig(filename)
+
+
+def flip_image(image, bboxes):
+    width = image.shape[2]
+    image_flip = torch.flip(image, dims=[2])
+    bboxes_flip = torch.zeros_like(bboxes)
+    bboxes_flip[bboxes == -1] = -1
+    box_idx = torch.where(bboxes[:, 0] != -1)[0]
+    bboxes_flip[box_idx, 2] = width - bboxes[box_idx, 0]
+    bboxes_flip[box_idx, 1] = bboxes[box_idx, 1]
+    bboxes_flip[box_idx, 0] = width - bboxes[box_idx, 2]
+    bboxes_flip[box_idx, 3] = bboxes[box_idx, 3]
+    return image_flip, bboxes_flip
+
+def random_flip_batch(images_batch, bboxes_batch):
+    batch_size = images_batch.shape[0]
+    to_flip = torch.rand((batch_size,))
+    to_flip = (to_flip > 0.5)
+
+    if not torch.any(to_flip):
+        return images_batch, bboxes_batch
+
+    images_to_flip = images_batch[to_flip, :, :, :]
+    bboxes_to_flip = bboxes_batch[to_flip, :, :]
+    images_flipped = []
+    bboxes_flipped = []
+    for image_single, bboxes_single in zip(images_to_flip, bboxes_to_flip):
+        image_single_flipped, bboxes_single_flipped = flip_image(image_single, bboxes_single)
+        images_flipped.append(image_single_flipped.unsqueeze(0))
+        bboxes_flipped.append(bboxes_single_flipped.unsqueeze(0))
+
+    images_flipped = torch.cat(images_flipped, dim=0)
+    bboxes_flipped = torch.cat(bboxes_flipped, dim=0)
+
+    images_batch[to_flip, :, :, :] = images_flipped
+    bboxes_batch[to_flip, :, :] = bboxes_flipped
+
+    return images_batch, bboxes_batch

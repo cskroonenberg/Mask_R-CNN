@@ -33,27 +33,31 @@ class FRCClassifier(nn.Module):
 
 
 class FRCClassifier_fasteronly(nn.Module):
-    def __init__(self, roi_size, backbone_size, n_labels, feature_to_image_scale, hidden_dim=512, dropout=0.1, device='cpu'):
+    def __init__(self, roi_size, backbone_size, n_labels, feature_to_image_scale, backbone_classifier, hidden_dim=512, dropout=0.1, loss_scale=1, device='cpu'):
         super().__init__()
         self.roi_size = roi_size
         self.feature_to_image_scale = feature_to_image_scale
+        self.loss_scale = loss_scale
         self.device = device
 
         # hidden
-        self.hidden = nn.Sequential(
-            nn.AvgPool2d(self.roi_size),
-            nn.Flatten(),
-            nn.Linear(backbone_size[0], hidden_dim),
-            nn.Dropout(dropout),
-            nn.ReLU()
-        ).to(device)
+        # self.hidden = nn.Sequential(
+        #     nn.AvgPool2d(self.roi_size),
+        #     nn.Flatten(),
+        #     nn.Linear(backbone_size[0], hidden_dim),
+        #     nn.Dropout(dropout),
+        #     nn.ReLU()
+        # ).to(device)
+
+        self.backbone_classifier = backbone_classifier
+        self.pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
 
         # classifier
-        self.classifier = nn.Linear(hidden_dim, n_labels + 1).to(device)
+        self.classifier = nn.Linear(2048, n_labels + 1).to(device)
         self.classifier_loss = nn.CrossEntropyLoss(reduction='sum')
 
         # box regression
-        self.box_regressor = nn.Linear(hidden_dim, 4 * (n_labels + 1)).to(device)
+        self.box_regressor = nn.Linear(2048, 4 * (n_labels + 1)).to(device)
         self.box_reg_loss = nn.SmoothL1Loss(reduction='sum')
 
     def forward(self, features, proposals, assigned_labels, truth_deltas, debug=False):
@@ -65,7 +69,10 @@ class FRCClassifier_fasteronly(nn.Module):
                                             spatial_scale=self.feature_to_image_scale)
 
         # apply hidden layers
-        out = self.hidden(roi_pool)
+        out1 = self.backbone_classifier(roi_pool)
+        out = self.pool(out1)
+        out = out.squeeze()
+        # out = self.hidden(roi_pool)
 
         # classification scores/loss
         class_scores = self.classifier(out)
@@ -90,7 +97,7 @@ class FRCClassifier_fasteronly(nn.Module):
         truth_deltas_fg = truth_deltas[fg_mask, :]
 
         # calculate box regression loss
-        box_reg_loss = self.box_reg_loss(box_reg_scores_fg[truth_delta_masks_fg], truth_deltas_fg.flatten()) / N
+        box_reg_loss = self.box_reg_loss(box_reg_scores_fg[truth_delta_masks_fg], truth_deltas_fg.flatten()) * self.loss_scale / (truth_deltas_fg.flatten().shape[0] + 1e-7) * features.shape[0]
 
         # debug loss breakdown
         if debug:
@@ -111,7 +118,9 @@ class FRCClassifier_fasteronly(nn.Module):
                                             spatial_scale=self.feature_to_image_scale)
 
         # apply hidden layers
-        out = self.hidden(roi_pool)
+        out1 = self.backbone_classifier(roi_pool)
+        out = self.pool(out1)
+        out = out.squeeze()
 
         # classification scores
         scores = self.classifier(out)

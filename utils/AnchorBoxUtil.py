@@ -231,14 +231,15 @@ def get_anchors(img, features, k_center_anchors):
 
     image_centers_w = np.arange(feature_w) * image_interval_w
     image_centers_h = np.arange(feature_h) * image_interval_h
-    image_centers = np.array(np.meshgrid(image_centers_h, image_centers_w)).transpose([2, 1, 0])
+    image_centers_temp = np.array(np.meshgrid(image_centers_w, image_centers_h))
+    image_centers = image_centers_temp.transpose([1, 2, 0])
 
-    image_centers = np.tile(image_centers, reps=2)
-    image_centers = np.tile(image_centers, reps=k)
-    anchors = (image_centers + k_center_anchors.flatten())
-    anchors = anchors.reshape(-1, 4)
-    anchor_within_image_mask = np.all((anchors[:, 0:2] >= [0, 0]) & (anchors[:, 2:4] <= [image_h, image_w]), axis=1)
-    anchors = torch.tensor(anchors, dtype=torch.float32)
+    image_centers1 = np.tile(image_centers, reps=2)
+    image_centers2 = np.tile(image_centers1, reps=k)
+    anchors = (image_centers2 + k_center_anchors.flatten())
+    anchors1 = anchors.reshape(-1, 4)
+    anchor_within_image_mask = np.all((anchors1[:, 0:2] >= [0, 0]) & (anchors1[:, 2:4] <= [image_w, image_h]), axis=1)
+    anchors2 = torch.tensor(anchors1, dtype=torch.float32)
     anchor_within_image_mask = torch.tensor(anchor_within_image_mask)
 
 
@@ -265,7 +266,7 @@ def get_anchors(img, features, k_center_anchors):
     #
     # anchors = image_centers + k_center_anchors
 
-    return anchors, anchor_within_image_mask
+    return anchors2, anchor_within_image_mask
 
 
 def get_anchors_batch(img_all, sizes, aspect_ratios, features_all, device='cpu'):

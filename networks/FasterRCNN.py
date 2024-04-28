@@ -11,8 +11,8 @@ from utils import AnchorBoxUtil
 
 class FasterRCNN(nn.Module):
     def __init__(self, img_size, roi_size, n_labels, top_n,
-                 pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, hidden_dim=512, dropout=0.1, backbone='resnet50',
-                 anc_scales=None, anc_ratios=None, device='cpu'):
+                 pos_thresh=0.68, neg_thresh=0.30, nms_thresh=0.7, hidden_dim_rpn=2048, hidden_dim_class=512, dropout=0.1, backbone='resnet50',
+                 anc_scales=None, anc_ratios=None, loss_scale=1, device='cpu'):
         super().__init__()
 
         self.hyper_params = {
@@ -22,11 +22,13 @@ class FasterRCNN(nn.Module):
             'pos_thresh': pos_thresh,
             'neg_thresh': neg_thresh,
             'nms_thresh': nms_thresh,
-            'hidden_dim': hidden_dim,
+            'hidden_dim_rpn': hidden_dim_rpn,
+            'hidden_dim_class': hidden_dim_class,
             'dropout': dropout,
             'backbone': backbone,
             'anc_scales': anc_scales,
-            'anc_ratios': anc_ratios
+            'anc_ratios': anc_ratios,
+            'loss_scale': loss_scale
         }
 
         self.device = device
@@ -34,9 +36,12 @@ class FasterRCNN(nn.Module):
         if backbone == 'resnet50':
             # resnet backbone
             model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)
-            req_layers = list(model.children())[:8]
+            req_layers = list(model.children())[:7]
             self.backbone = nn.Sequential(*req_layers).eval().to(device)
             for param in self.backbone.named_parameters():
+                param[1].requires_grad = True
+            self.backbone_classifier = list(model.children())[7]
+            for param in self.backbone_classifier.named_parameters():
                 param[1].requires_grad = True
 
             # Freeze initial layers
@@ -53,14 +58,19 @@ class FasterRCNN(nn.Module):
                     for param in child.named_parameters():
                         param[1].requires_grad = False
 
-            self.backbone_size = (2048, 15, 20)
-            self.feature_to_image_scale = 0.03125
+            for child in self.backbone_classifier.modules():
+                if type(child) == nn.BatchNorm2d:
+                    for param in child.named_parameters():
+                        param[1].requires_grad = False
+
+            self.backbone_size = (1024, 30, 40)
+            self.feature_to_image_scale = 0.0625
         else:
             raise NotImplementedError
 
         # initialize the RPN and classifier
-        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim, dropout, anc_scales, anc_ratios, device=device).to(device)
-        self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, self.feature_to_image_scale, hidden_dim, dropout, device=device).to(device)
+        self.rpn = FRCRPN(img_size, pos_thresh, neg_thresh, nms_thresh, top_n, self.backbone_size, hidden_dim_rpn, dropout, anc_scales, anc_ratios, loss_scale, device=device).to(device)
+        self.classifier = FRCClassifier_fasteronly(roi_size, self.backbone_size, n_labels, self.feature_to_image_scale, self.backbone_classifier, hidden_dim_class, dropout, loss_scale, device=device).to(device)
 
     def forward(self, images, truth_labels, truth_bboxes, debug=False):
         # with torch.no_grad():
@@ -85,7 +95,7 @@ class FasterRCNN(nn.Module):
 
         return rpn_loss + class_loss
 
-    def evaluate(self, images, top_n=128, confidence_thresh=0.5, nms_thresh_final=0.2, device='cpu'):
+    def evaluate(self, images, top_n=300, confidence_thresh=0.05, nms_thresh_final=0.3, device='cpu', metrics=False):
         features = self.backbone(images)
 
         proposals_by_batch = self.rpn.evaluate(features, images, top_n)
@@ -93,8 +103,10 @@ class FasterRCNN(nn.Module):
 
         batch_proposals = []
         batch_labels = []
+        batch_scores = []
         for idx, proposals_i in enumerate(proposals_by_batch):
             class_proposals_dict = {}
+            class_scores_dict = {}
             scores_i = class_scores[idx * top_n:(idx + 1) * top_n, :]
             deltas_i = box_deltas[idx * top_n:(idx + 1) * top_n, :]
 
@@ -114,25 +126,39 @@ class FasterRCNN(nn.Module):
                 nms_mask = torchvision.ops.nms(proposals_i_class_select, scores_i_class_select, nms_thresh_final)
 
                 class_proposals_dict[class_idx] = proposals_i_class_select[nms_mask]
+                class_scores_dict[class_idx] = scores_i_class_select[nms_mask]
 
             filtered_proposals = []
             filtered_labels = []
+            filtered_scores = []
 
             for cls in class_proposals_dict.keys():
                 prop = class_proposals_dict[cls]
+                src = class_scores_dict[cls]
                 filtered_labels = filtered_labels + [cls] * prop.shape[0]
                 filtered_proposals.append(prop)
+                filtered_scores.append(src)
 
             if len(filtered_proposals) == 0:
                 filtered_proposals = torch.tensor(filtered_proposals)
+                filtered_scores = torch.tensor(filtered_scores)
             else:
                 filtered_proposals = torch.cat(filtered_proposals)
+                filtered_scores = torch.cat(filtered_scores)
             filtered_labels = torch.tensor(filtered_labels)
 
             batch_proposals.append(filtered_proposals)
-            batch_labels.append(filtered_labels)
+            batch_labels.append(filtered_labels.to(device))
+            batch_scores.append(filtered_scores.to(device))
 
-        return batch_proposals, batch_labels
+        if metrics:
+            metric_dict_list = []
+            for single_proposals, single_labels, single_scores in zip(batch_proposals, batch_labels, batch_scores):
+                metric_dict = {'boxes': single_proposals, 'scores': single_scores, 'labels': single_labels}
+                metric_dict_list.append(metric_dict)
+            return metric_dict_list
+        else:
+            return batch_proposals, batch_labels
 
     # def evaluate(self, images, confidence_thresh=0.8, nms_thresh=0.4, device='cpu'):
     #     features = self.backbone(images)

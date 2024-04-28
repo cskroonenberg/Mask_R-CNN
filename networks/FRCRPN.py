@@ -8,7 +8,7 @@ from utils import AnchorBoxUtil
 
 
 class FRCRPN(nn.Module):
-    def __init__(self, img_size, pos_thresh, neg_thresh, nms_thresh, top_n, backbone_size, hidden_dim=512, dropout=0.1, anc_scales=None, anc_ratios=None, device='cpu'):
+    def __init__(self, img_size, pos_thresh, neg_thresh, nms_thresh, top_n, backbone_size, hidden_dim=512, dropout=0.1, anc_scales=None, anc_ratios=None, loss_scale=1, device='cpu'):
         super().__init__()
 
         self.device = device
@@ -22,6 +22,7 @@ class FRCRPN(nn.Module):
         self.nms_thresh = nms_thresh
 
         self.top_n = top_n
+        self.loss_scale = loss_scale
 
         # scales and ratios
         if anc_scales is None:
@@ -71,7 +72,7 @@ class FRCRPN(nn.Module):
 
         confidence = self.confidence(proposal) # batch_size x 1*k x feature h x feature w
         confidence = confidence.permute(0, 2, 3, 1)
-        confidence = confidence.reshape(batch_size, -1, 1).squeeze()
+        confidence = confidence.reshape(batch_size, -1)
         confidence = confidence[:, anchor_within_image_mask]
 
         total_loss = 0
@@ -98,15 +99,14 @@ class FRCRPN(nn.Module):
             target = torch.cat((torch.ones_like(pos_confidence), torch.zeros_like(neg_confidence)))
             scores = torch.cat((pos_confidence, neg_confidence))
             class_loss = self.ce_loss(scores, target) / target.shape[0]
-            # bbox_loss = self.l1_loss(pos_offset, pos_regression) / target.shape[0]
-            bbox_loss = self.l1_loss(pos_regression, pos_offset) / target.shape[0]
+            bbox_loss = self.l1_loss(pos_regression, pos_offset) * self.loss_scale / (pos_offset.shape[0] + 1e-7)
             total_loss = total_loss + class_loss + bbox_loss
             losses['rpn_class'] += class_loss.item()
             losses['rpn_box'] += bbox_loss.item()
 
             proposal = AnchorBoxUtil.delta_to_boxes(regression_i, anchors_single)
 
-            prenms_topn = 6000
+            prenms_topn = 12000
             if confidence_i.shape[0] < prenms_topn:
                 prenms_topn = confidence_i.shape[0]
 
@@ -146,7 +146,7 @@ class FRCRPN(nn.Module):
 
         confidence = self.confidence(proposal)  # batch_size x 1*k x feature h x feature w
         confidence = confidence.permute(0, 2, 3, 1)
-        confidence = confidence.reshape(batch_size, -1, 1).squeeze()
+        confidence = confidence.reshape(batch_size, -1)
 
         top_proposals = []
 

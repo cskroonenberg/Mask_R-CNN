@@ -10,10 +10,11 @@ import sys
 import torch
 import time
 from tqdm import tqdm
-from utils import EvalUtil
+from utils import EvalUtil, ImageUtil
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 
-def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, batch_size, id2str, device='cpu', verbose=True, save=True):
+def train_model(model, optimizer, data_train, data_val, num_epochs, batch_size, id2str, device='cpu', verbose=True, save=True, horizontal_flip=False, metrics=False):
     quiet = not verbose
 
     can_debug = isinstance(model, FasterRCNN)
@@ -41,6 +42,10 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
         train_losses = {'rpn_class': 0, 'rpn_box': 0, 'cls_class': 0, 'cls_box': 0}
         for data in tqdm(dataloader, disable=quiet, desc='Training Model', file=sys.stdout):
             # Send data to CUDA device
+            if horizontal_flip:
+                images_batch, labels_batch, bboxes_batch = data
+                images_batch, bboxes_batch = ImageUtil.random_flip_batch(images_batch, bboxes_batch)
+                data = (images_batch, labels_batch, bboxes_batch)
             data_device = []
             for item in data:
                 # Segmentation masks are not stored as Tensors because they are all different shapes
@@ -73,7 +78,12 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
         batch_eval_boxes = []
         batch_eval_labels = []
         val_losses = {'rpn_class': 0, 'rpn_box': 0, 'cls_class': 0, 'cls_box': 0}
+        if metrics:
+            mAP = MeanAveragePrecision()
         with torch.no_grad():
+            if metrics:
+                preds = []
+                targets = []
             for data in tqdm(dataloader_val, disable=quiet, desc='Running Validation', file=sys.stdout):
                 data_device = []
                 for item in data:
@@ -93,22 +103,43 @@ def train_model(model, optimizer, scheduler, data_train, data_val, num_epochs, b
                 val_loss += val_loss_epoch.item()
 
                 # compute validation mAP
-                proposals, labels = model.evaluate(data[0], device=device)
+                if metrics:
+                    batch_dict = model.evaluate(data[0], device=device, metrics=True)
+                    batch_gt = []
 
-                batch_truth_boxes += [entry.tolist() for entry in data[2]]
-                batch_truth_labels += [entry.tolist() for entry in data[1]]
-                batch_eval_boxes += [entry.tolist() for entry in proposals]
-                batch_eval_labels += [entry.tolist() for entry in labels]
-        val_mAP, ap_dict = EvalUtil.model_eval(id2str,
-                                               batch_truth_boxes,
-                                               batch_truth_labels,
-                                               batch_eval_boxes,
-                                               batch_eval_labels)
+                    for i in range(batch_size):
+                        gt_labels = data[1][i, :]
+                        gt_boxes = data[2][i, :, :]
+                        gt_labels = gt_labels[gt_labels != -1]
+                        gt_boxes = gt_boxes[torch.all((gt_boxes != -1), dim=1), :]
+                        gt = {'boxes': gt_boxes, 'labels': gt_labels}
+                        batch_gt.append(gt)
+
+                    preds = preds + batch_dict
+                    targets = targets + batch_gt
+                else:
+                    proposals, labels = model.evaluate(data[0], device=device, metrics=False)
+
+                    batch_truth_boxes += [entry.tolist() for entry in data[2]]
+                    batch_truth_labels += [entry.tolist() for entry in data[1]]
+                    batch_eval_boxes += [entry.tolist() for entry in proposals]
+                    batch_eval_labels += [entry.tolist() for entry in labels]
+        if metrics:
+            mAP.update(preds, targets)
+            result = mAP.compute()
+            val_mAP = result['map'].item()
+            ap_dict = {}
+        else:
+            val_mAP, ap_dict = EvalUtil.model_eval(id2str,
+                                                   batch_truth_boxes,
+                                                   batch_truth_labels,
+                                                   batch_eval_boxes,
+                                                   batch_eval_labels)
         val_loss = val_loss / data_val.n_samples
 
         model.train()
 
-        scheduler.step()
+        # scheduler.step()
 
         # track loss
         loss /= data_train.n_samples
