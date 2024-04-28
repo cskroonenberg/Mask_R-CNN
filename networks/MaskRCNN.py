@@ -133,7 +133,7 @@ class MaskRCNN(nn.Module):
         gt_resized_masks = self.unpack_mask_truth(truth_masks)
         
         # Calculate mask loss
-        mask_loss = self.mask_loss_fn(gt_pred_masks, gt_resized_masks.to(self.device)) * 100
+        mask_loss = self.mask_loss_fn(gt_pred_masks, gt_resized_masks.to(self.device))
 
         return rpn_loss, class_loss, mask_loss
 
