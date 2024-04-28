@@ -33,11 +33,13 @@ class FRCClassifier(nn.Module):
 
 
 class FRCClassifier_fasteronly(nn.Module):
-    def __init__(self, roi_size, backbone_size, n_labels, feature_to_image_scale, hidden_dim=512, dropout=0.1, device='cpu'):
+    def __init__(self, roi_size, backbone_size, n_labels, feature_to_image_scale, hidden_dim=512, dropout=0.1, device='cpu', mrcnn=False):
         super().__init__()
         self.roi_size = roi_size
         self.feature_to_image_scale = feature_to_image_scale
         self.device = device
+
+        self.mrcnn = mrcnn
 
         # hidden
         self.hidden = nn.Sequential(
@@ -59,10 +61,17 @@ class FRCClassifier_fasteronly(nn.Module):
     def forward(self, features, proposals, assigned_labels, truth_deltas, debug=False):
         N = proposals[0].shape[0]
         # perform ROI pooling
-        roi_pool = torchvision.ops.roi_pool(input=features,
-                                            boxes=proposals,
-                                            output_size=self.roi_size,
-                                            spatial_scale=self.feature_to_image_scale)
+        
+        if self.mrcnn:
+            roi_pool = torchvision.ops.roi_align(input=features,
+                                                boxes=proposals,
+                                                output_size=self.roi_size,
+                                                spatial_scale=self.feature_to_image_scale)
+        else:
+            roi_pool = torchvision.ops.roi_pool(input=features,
+                                                boxes=proposals,
+                                                output_size=self.roi_size,
+                                                spatial_scale=self.feature_to_image_scale)
 
         # apply hidden layers
         out = self.hidden(roi_pool)
@@ -91,6 +100,7 @@ class FRCClassifier_fasteronly(nn.Module):
 
         # calculate box regression loss
         box_reg_loss = self.box_reg_loss(box_reg_scores_fg[truth_delta_masks_fg], truth_deltas_fg.flatten()) / N
+        # box_reg_loss = self.box_reg_loss(box_reg_scores_fg[truth_delta_masks_fg], truth_deltas_fg.flatten()) / (truth_deltas_fg.flatten().shape[0] + 1e-7) * features.shape[0]
 
         # debug loss breakdown
         if debug:
@@ -105,10 +115,16 @@ class FRCClassifier_fasteronly(nn.Module):
     def evaluate(self, features, proposals):
 
         # perform ROI pooling
-        roi_pool = torchvision.ops.roi_pool(input=features,
-                                            boxes=proposals,
-                                            output_size=self.roi_size,
-                                            spatial_scale=self.feature_to_image_scale)
+        if self.mrcnn:
+            roi_pool = torchvision.ops.roi_align(input=features,
+                                                boxes=proposals,
+                                                output_size=self.roi_size,
+                                                spatial_scale=self.feature_to_image_scale)
+        else:
+            roi_pool = torchvision.ops.roi_pool(input=features,
+                                                boxes=proposals,
+                                                output_size=self.roi_size,
+                                                spatial_scale=self.feature_to_image_scale)
 
         # apply hidden layers
         out = self.hidden(roi_pool)

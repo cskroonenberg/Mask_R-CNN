@@ -97,9 +97,11 @@ class FRCRPN(nn.Module):
             # calculate loss
             target = torch.cat((torch.ones_like(pos_confidence), torch.zeros_like(neg_confidence)))
             scores = torch.cat((pos_confidence, neg_confidence))
+            
             class_loss = self.ce_loss(scores, target) / target.shape[0]
-            # bbox_loss = self.l1_loss(pos_offset, pos_regression) / target.shape[0]
             bbox_loss = self.l1_loss(pos_regression, pos_offset) / target.shape[0]
+            # bbox_loss = self.l1_loss(pos_regression, pos_offset) / (pos_offset.shape[0] + 1e-7)
+            
             total_loss = total_loss + class_loss + bbox_loss
             losses['rpn_class'] += class_loss.item()
             losses['rpn_box'] += bbox_loss.item()
